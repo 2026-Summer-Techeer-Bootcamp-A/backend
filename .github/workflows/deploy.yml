@@ -24,7 +24,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
-          workload_identity_provider: projects/PROJECT_NUM/locations/global/workloadIdentityPools/github-pool/providers/github-provider # TODO: replace PROJECT_NUM with `gcloud projects describe project-bc9a4402-231d-49bc-a3c --format="value(projectNumber)"`
+          workload_identity_provider: projects/774556382259/locations/global/workloadIdentityPools/github-pool/providers/github-provider
           service_account: gh-deployer@project-bc9a4402-231d-49bc-a3c.iam.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@v2
@@ -41,7 +41,17 @@ jobs:
 
       - name: Deploy on VM via SSH
         run: |
-          gcloud compute ssh app-vm --zone ${REGION}-a --command "cd ~/app && docker compose pull && docker compose up -d"
+          gcloud compute ssh app-vm --zone ${REGION}-a --command \
+            "cd ~/app && docker compose pull && docker compose up -d && docker compose ps" | tee deploy_out.txt
+
+      - name: Notify Discord
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
+          JOB: Deploy
+        run: |
+          DETAILS="$(tail -n 20 deploy_out.txt 2>/dev/null)" python3 scripts/notify.py
 
 # TODO(IAM): the gh-deployer service account needs the following roles:
 #   - roles/artifactregistry.writer
