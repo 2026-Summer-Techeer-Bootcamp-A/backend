@@ -27,12 +27,15 @@ _COLOR_SUCCESS = 0x2ECC71  # green
 _COLOR_FAILURE = 0xE74C3C  # red
 _COLOR_NEUTRAL = 0x95A5A6  # grey (cancelled / unknown)
 
-# status -> (icon, color, past-tense verb)
+# status -> (icon, color, 한국어 상태어)
 _STATUS_META = {
-    "success": ("✅", _COLOR_SUCCESS, "succeeded"),
-    "failure": ("❌", _COLOR_FAILURE, "failed"),
-    "cancelled": ("⚪", _COLOR_NEUTRAL, "cancelled"),
+    "success": ("✅", _COLOR_SUCCESS, "성공"),
+    "failure": ("❌", _COLOR_FAILURE, "실패"),
+    "cancelled": ("⚪", _COLOR_NEUTRAL, "취소됨"),
 }
+
+# 잡 이름 -> 한국어 표시
+_JOB_KO = {"CI": "CI", "Deploy": "배포"}
 
 
 def _env(name: str, default: str = "") -> str:
@@ -42,7 +45,11 @@ def _env(name: str, default: str = "") -> str:
 def _build_embed() -> dict:
     status = _env("STATUS", "success").lower()
     job = _env("JOB", "CI")
-    icon, color, verb = _STATUS_META.get(status, ("⚪", _COLOR_NEUTRAL, status or "ran"))
+    icon, color, verb = _STATUS_META.get(status, ("⚪", _COLOR_NEUTRAL, status or "완료"))
+    job_ko = _JOB_KO.get(job, job)
+
+    # CI가 깨지면 빌드를 부순 '범인'을 지목한다 (너드 감성)
+    is_ci_fail = job == "CI" and status == "failure"
 
     repo = _env("GITHUB_REPOSITORY", "local/repo")
     branch = _env("GITHUB_REF_NAME", "-")
@@ -56,26 +63,30 @@ def _build_embed() -> dict:
     run_url = f"{server}/{repo}/actions/runs/{run_id}" if run_id else server
 
     fields = [
-        {"name": "Repo", "value": repo, "inline": True},
-        {"name": "Branch", "value": branch, "inline": True},
-        {"name": "Commit", "value": f"[`{short_sha}`]({commit_url})", "inline": True},
-        {"name": "By", "value": actor, "inline": True},
+        {"name": "저장소", "value": repo, "inline": True},
+        {"name": "브랜치", "value": branch, "inline": True},
+        {"name": "커밋", "value": f"[`{short_sha}`]({commit_url})", "inline": True},
+        {"name": "🚨 범인" if is_ci_fail else "보낸 사람", "value": actor, "inline": True},
     ]
 
-    # Optional container health (e.g. `docker compose ps`) captured by the deploy job.
+    # 배포 잡이 넘겨준 컨테이너 상태(docker compose ps)를 코드블록으로 첨부.
     details = _env("DETAILS").strip()
     if details:
-        # Discord field values cap at 1024 chars; leave margin for the code fence.
+        # Discord 필드값은 1024자 제한 -> 코드펜스 여유를 두고 자름.
         clipped = details[-960:]
-        fields.append({"name": "Containers", "value": f"```\n{clipped}\n```", "inline": False})
+        fields.append({"name": "컨테이너", "value": f"```\n{clipped}\n```", "inline": False})
 
-    return {
-        "title": f"{icon} {job} {verb}",
+    embed = {
+        "title": f"{icon} {job_ko} {verb}",
         "url": run_url,
         "color": color,
         "fields": fields,
         "footer": {"text": "GitHub Actions"},
     }
+    if is_ci_fail:
+        embed["description"] = "빌드가 깨졌습니다 (`exit 1`). `git blame` 이 지목한 유력 용의자 👇"
+        embed["footer"] = {"text": "CI 경찰청 · 강력계"}
+    return embed
 
 
 def notify_discord(webhook_url: str) -> None:
