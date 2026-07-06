@@ -42,7 +42,7 @@ jobs:
       - name: Deploy on VM via SSH
         run: |
           gcloud compute ssh app-vm --zone ${REGION}-a --command \
-            "cd ~/app && docker compose pull && docker compose up -d && docker compose ps" | tee deploy_out.txt
+            "cd /opt/app && sudo docker compose pull && sudo docker compose up -d && sudo docker compose ps" | tee deploy_out.txt
 
       - name: Notify Discord
         if: always()
@@ -58,8 +58,12 @@ jobs:
 #   - roles/compute.instanceAdmin.v1
 #   - roles/iam.serviceAccountUser
 #
-# TODO: enable OS Login (or otherwise provide SSH access) for `gcloud compute ssh` to work.
-# The target VM's ~/app directory must contain docker-compose.yml, .env, and observability/.
+# TODO: grant gh-deployer roles/compute.osAdminLogin so `gcloud compute ssh` can run
+# sudo docker non-interactively (the CI logs in as a fresh OS Login POSIX user without
+# the docker group). The deploy target is a fixed path /opt/app (NOT ~/app -- the CI
+# user's home differs from the human's). /opt/app must contain docker-compose.yml, .env,
+# and observability/. Also run `sudo gcloud auth configure-docker <region>-docker.pkg.dev`
+# on the VM so root's docker can pull from Artifact Registry.
 #
 # TODO: create the Artifact Registry repo before the first deploy:
 #   gcloud artifacts repositories create app --repository-format=docker --location=asia-northeast3
