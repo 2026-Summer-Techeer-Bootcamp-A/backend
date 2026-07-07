@@ -118,3 +118,4 @@ backend/
 - **taxonomy_v2.json을 앱이 어떻게 읽나**: 이력서 정규화(F1)도 같은 사전을 써야 하는데, `collector/taxonomy_v2.json`을 앱이 직접 import해서 읽을지, 아니면 이 JSON을 최초 1회 `skill`/`skill_alias` 테이블에 적재해두고 앱은 DB만 보는 방식일지 아직 결정 안 됨. (DB만 보는 쪽이 API 서버 입장에선 더 깔끔해 보임 — 다음에 확정 필요.)
 - **mart.db(SQLite) → PostgreSQL 1회 이관 스크립트**의 정확한 위치/이름 (`scripts/migrate_mart.py` 정도로 예상, 아직 안 정함).
 - **실제 DB 마이그레이션(alembic/`app/schema/*.sql`)은 아직 안 만듦**: `app/models/`는 채워졌지만, 이 모델대로 실제 Postgres 테이블을 만드는 마이그레이션은 다음 단계.
+
