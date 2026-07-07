@@ -11,10 +11,20 @@ from sqlalchemy import inspect, text
 from app.core.db import engine
 
 from app.core.config import settings
-from app.core.db import get_session
-from app.models import Person
+from app.core.db import get_session, engine
+from app.core.db import Base
+from app.models import Person, __init__ as models_init
+from app.routers.auth import router as auth_router
+from contextlib import asynccontextmanager
 
-app = FastAPI(title=settings.otel_service_name)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 애플리케이션 시작 시, SQLAlchemy 모델들을 기반으로 DB에 아직 없는 테이블들을 모두 자동 생성합니다.
+    # 추후 Alembic 등 마이그레이션 도구가 정착되면 제거할 개발 편의성 코드입니다.
+    Base.metadata.create_all(bind=engine)
+    yield
+
+app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
 
 Instrumentator().instrument(app).expose(app)
 
@@ -29,6 +39,8 @@ templates = Jinja2Templates(directory=templates_dir)
 # TODO: wire up Redis client using settings.redis_url.
 # TODO: wire up OTel trace export to settings.otel_exporter_otlp_endpoint.
 # TODO: configure structured JSON logging.
+
+app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 
 
 class PersonOut(BaseModel):

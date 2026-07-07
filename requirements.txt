@@ -9,3 +9,6 @@ bcrypt
 faker
 jinja2
 python-multipart
+PyJWT
+redis
+email-validator
