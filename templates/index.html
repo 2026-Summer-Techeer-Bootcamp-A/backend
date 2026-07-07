@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Welcome{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 1rem; text-align: center;">
+    <div>
+        <i class="fa-solid fa-cube" style="font-size: 3rem; color: var(--primary); margin-bottom: 0.5rem;"></i>
+        <h1 style="font-size: 2rem; margin-bottom: 0.5rem;">Career Backend Portal</h1>
+        <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 500px; margin: 0 auto;">
+            백엔드 시스템 테스트 및 관리를 위한 미니멀 포털입니다.
+        </p>
+    </div>
+    
+    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+        <a href="/easy-dash" class="glass-panel hover-card" style="border: 2px solid var(--primary);">
+            <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 1.5rem; color: var(--primary); margin-bottom: 0.5rem;"></i>
+            <h3 style="color: var(--text-main); font-size: 1rem; margin-bottom: 0.25rem;">Easy Dash</h3>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">핵심 사용자 플로우 간편 테스트</span>
+        </a>
+
+        <a href="/test-ui" class="glass-panel hover-card">
+            <i class="fa-solid fa-code" style="font-size: 1.5rem; color: var(--accent); margin-bottom: 0.5rem;"></i>
+            <h3 style="color: var(--text-main); font-size: 1rem; margin-bottom: 0.25rem;">API Dashboard</h3>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">전체 API 상세 명세 및 테스트</span>
+        </a>
+        
+        <a href="/db-viewer" class="glass-panel hover-card">
+            <i class="fa-solid fa-database" style="font-size: 1.5rem; color: var(--success); margin-bottom: 0.5rem;"></i>
+            <h3 style="color: var(--text-main); font-size: 1rem; margin-bottom: 0.25rem;">DB Viewer</h3>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">원시 데이터베이스 레코드 조회</span>
+        </a>
+    </div>
+    
+    <style>
+        .hover-card {
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            padding: 1.5rem 1rem; 
+            text-decoration: none; 
+            border-radius: var(--radius); 
+            width: 200px; 
+            background: var(--input-bg);
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .hover-card:hover {
+            background: var(--panel-border);
+        }
+    </style>
+</div>
+{% endblock %}

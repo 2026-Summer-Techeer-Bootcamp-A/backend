@@ -1,0 +1,349 @@
+{% extends "layout.html" %}
+{% block page_title %}Easy Dash (Full Mock Site){% endblock %}
+
+{% block content %}
+<div class="easy-dash-grid">
+    <!-- Easy Dash SPA Navigation -->
+    <div class="easy-nav-panel glass-panel">
+        <div class="panel-header" style="justify-content: center; color: var(--primary);">
+            Mock Site Nav
+        </div>
+        <div class="api-list-container">
+            <div class="api-group-title">계정 (ACCOUNT)</div>
+            <div class="easy-nav-item active" onclick="switchView('view-auth', this)"><i class="fa-solid fa-user-lock"></i> 인증 & 내 정보</div>
+            
+            <div class="api-group-title">개인 (PERSONAL)</div>
+            <div class="easy-nav-item" onclick="switchView('view-resume', this)"><i class="fa-solid fa-file-pdf"></i> 이력서 관리</div>
+            <div class="easy-nav-item" onclick="switchView('view-match', this)"><i class="fa-solid fa-bullseye"></i> 내 커리어 매칭</div>
+            
+            <div class="api-group-title">시장 (MARKET)</div>
+            <div class="easy-nav-item" onclick="switchView('view-stats', this)"><i class="fa-solid fa-chart-pie"></i> 시장 인사이트</div>
+            <div class="easy-nav-item" onclick="switchView('view-jobs', this)"><i class="fa-solid fa-briefcase"></i> 채용 공고 검색</div>
+            
+            <div class="api-group-title">인공지능 (AI)</div>
+            <div class="easy-nav-item" onclick="switchView('view-ai', this)"><i class="fa-solid fa-robot"></i> AI 어시스턴트</div>
+            
+            <div class="api-group-title">관리자 (ADMIN)</div>
+            <div class="easy-nav-item" onclick="switchView('view-admin', this)"><i class="fa-solid fa-gear"></i> 수집기 관리</div>
+        </div>
+    </div>
+
+    <!-- UI Flow Panel (Main Content) -->
+    <div class="easy-ui-panel glass-panel">
+        <div class="panel-header" id="current-view-title">
+            인증 & 내 정보
+        </div>
+        
+        <!-- ================= View 1: Auth & Me ================= -->
+        <div id="view-auth" class="view-section active">
+            <div style="display: flex; gap: 1rem;">
+                <div class="mock-form-container" style="background: var(--input-bg); border-radius: var(--radius);">
+                    <h3 style="margin-bottom: 1rem; font-size: 1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.5rem;">로그인</h3>
+                    <div class="mock-form-group">
+                        <label>이메일 (Email)</label>
+                        <input type="email" id="login-email" class="input-control" value="test@example.com">
+                    </div>
+                    <div class="mock-form-group">
+                        <label>비밀번호 (Password)</label>
+                        <input type="password" id="login-pass" class="input-control" value="password">
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-primary" style="flex:1;" onclick="doLogin()">로그인 (POST /auth/login)</button>
+                        <button class="btn" onclick="doLogout()">로그아웃 (POST /auth/logout)</button>
+                    </div>
+                </div>
+
+                <div class="mock-form-container" style="background: var(--input-bg); border-radius: var(--radius);">
+                    <h3 style="margin-bottom: 1rem; font-size: 1rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.5rem;">회원가입</h3>
+                    <div class="mock-form-group">
+                        <label>새 이메일 (Email)</label>
+                        <input type="email" id="signup-email" class="input-control">
+                    </div>
+                    <div class="mock-form-group">
+                        <label>비밀번호 (Password)</label>
+                        <input type="password" id="signup-pass" class="input-control">
+                    </div>
+                    <div class="mock-form-group">
+                        <label>닉네임 (Nickname)</label>
+                        <input type="text" id="signup-nick" class="input-control">
+                    </div>
+                    <button class="btn" style="width: 100%;" onclick="doSignup()">회원가입 (POST /auth/signup)</button>
+                </div>
+            </div>
+            <div style="margin-top: 1rem;">
+                <button class="btn" onclick="doGetMe()">내 정보 조회 (GET /auth/me)</button>
+                <div id="me-result" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.8rem; background: var(--input-bg); padding: 0.5rem;">(불러오지 않음)</div>
+            </div>
+        </div>
+
+        <!-- ================= View 2: Resume Manager ================= -->
+        <div id="view-resume" class="view-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <button class="btn" onclick="doLoadResumes()">내 이력서 목록 불러오기 (GET /resume)</button>
+                <span id="current-resume-display" style="font-weight: 600; color: var(--primary);">현재 선택: 없음</span>
+            </div>
+            <div id="resume-list" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;"></div>
+            <hr style="border:0; border-top: 1px solid var(--panel-border); margin-bottom: 1rem;">
+            
+            <div style="display: flex; gap: 1rem;">
+                <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">1. 이력서 파싱 (PDF)</h3>
+                    <input type="file" id="resume-file" accept=".pdf" class="input-control" style="margin-bottom: 0.5rem;">
+                    <button class="btn btn-primary btn-sm" style="width: 100%" onclick="doParseResume()">업로드 및 스킬 추출 (POST /resume/parse)</button>
+                    <div id="parsed-skills-list" style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); max-height: 100px; overflow-y: auto;"></div>
+                </div>
+                
+                <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">2. 확정 (임시 세션 발급)</h3>
+                    <div class="mock-form-group">
+                        <label>풀 (Pool)</label>
+                        <select id="resume-pool" class="input-control"><option value="global">글로벌 (global)</option><option value="domestic">국내 (domestic)</option></select>
+                    </div>
+                    <button class="btn btn-primary btn-sm" style="width: 100%" onclick="doConfirmResume()">임시 세션 발급 (POST /resume/confirm)</button>
+                    <div id="session-display" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.75rem; color: var(--warning); word-break: break-all;"></div>
+                </div>
+                
+                <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">3. 이력서 정식 저장</h3>
+                    <div class="mock-form-group">
+                        <label>이력서 제목 (Title)</label>
+                        <input type="text" id="resume-title" class="input-control" placeholder="예: 2026 백엔드 지원용">
+                    </div>
+                    <button class="btn btn-sm" style="width: 100%; border-color: var(--success); color: var(--success);" onclick="doSaveResume()">저장 (POST /resume)</button>
+                </div>
+            </div>
+            
+            <div style="margin-top: 1rem; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">선택된 이력서 관리</h3>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm" onclick="doGetResume()">상세 보기 (GET /resume/{id})</button>
+                    <button class="btn btn-sm" onclick="doUpdateResume()">수정 (PUT /resume/{id})</button>
+                    <button class="btn btn-sm" style="color: var(--danger); border-color: var(--danger);" onclick="doDeleteResume()">삭제 (DELETE /resume/{id})</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= View 3: My Match ================= -->
+        <div id="view-match" class="view-section">
+            <div style="background: var(--primary); color: white; padding: 0.5rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; font-size: 0.85rem;">
+                분석 대상: <span id="match-target-info" style="font-weight:700;">선택된 이력서나 세션이 없습니다. 이력서 관리 탭을 먼저 방문하세요.</span>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 1rem;">
+                <!-- Coverage -->
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); border-radius: var(--radius); margin: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <h3 style="font-size: 0.9rem;">커버리지 점수 (Coverage)</h3>
+                        <button class="btn btn-sm btn-primary" onclick="doGetCoverage()">GET /match/coverage</button>
+                    </div>
+                    <div id="match-coverage-score" style="font-size: 2.5rem; font-weight: 700; color: var(--success); text-align: center; margin: 1rem 0;">-- %</div>
+                    <div id="match-coverage-list" style="font-size: 0.75rem;"></div>
+                </div>
+
+                <!-- Gap -->
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); border-radius: var(--radius); margin: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <h3 style="font-size: 0.9rem;">기술 갭 (Gap Top 5)</h3>
+                        <button class="btn btn-sm btn-primary" onclick="doGetGap()">GET /match/gap</button>
+                    </div>
+                    <div id="match-gap-list" style="font-size: 0.75rem; margin-top: 0.5rem;"></div>
+                    <div id="match-radar-list" style="font-size: 0.75rem; margin-top: 0.5rem;"></div>
+                </div>
+
+                <!-- What-if -->
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); border-radius: var(--radius); margin: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <h3 style="font-size: 0.9rem;">시뮬레이터 (What-if)</h3>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <input type="text" id="whatif-skill" class="input-control" placeholder="예: Kubernetes">
+                        <button class="btn btn-sm btn-primary" onclick="doGetWhatIf()">GET /match/what-if</button>
+                    </div>
+                    <div id="match-whatif-res" style="font-size: 0.75rem;"></div>
+                </div>
+                
+                <!-- Cert Gap -->
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); border-radius: var(--radius); margin: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <h3 style="font-size: 0.9rem;">자격증 갭 (Cert Gap)</h3>
+                        <button class="btn btn-sm btn-primary" onclick="doGetCertGap()">GET /cert/gap</button>
+                    </div>
+                    <div id="match-certgap-res" style="font-size: 0.75rem;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= View 4: Market Stats ================= -->
+        <div id="view-stats" class="view-section">
+            <!-- Autocompletes -->
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; overflow-x: auto; padding-bottom: 0.5rem;">
+                <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">기술 사전 (GET /skills)</h4>
+                    <input type="text" class="input-control" placeholder="검색어 입력..." oninput="doGetSkills(this.value)">
+                    <div id="ac-skills" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;"></div>
+                </div>
+                <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">직무 필터 (GET /job-categories)</h4>
+                    <button class="btn btn-sm" onclick="doGetJobs()">목록 불러오기</button>
+                </div>
+                <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">산업 필터 (GET /industries)</h4>
+                    <button class="btn btn-sm" onclick="doGetIndustries()">목록 불러오기</button>
+                </div>
+                <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">자격증 사전 (GET /certs)</h4>
+                    <input type="text" class="input-control" placeholder="검색어 입력..." oninput="doGetCerts(this.value)">
+                </div>
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 1rem;">
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">기술 점유율 (GET /stats/skills)</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <select id="stat-pool" class="input-control"><option value="global">글로벌 (global)</option><option value="domestic">국내 (domestic)</option></select>
+                        <select id="stat-pos" class="input-control"><option value="backend">backend</option><option value="frontend">frontend</option></select>
+                        <button class="btn btn-primary" onclick="doGetSkillShare()">조회</button>
+                    </div>
+                    <div id="stat-skill-share" style="font-size: 0.75rem; max-height: 150px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">동시 출현 (GET /stats/cooccurrence)</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <input type="text" id="co-skill" class="input-control" value="Python">
+                        <button class="btn btn-primary" onclick="doGetCooccur()">조회</button>
+                    </div>
+                    <div id="stat-cooccur" style="font-size: 0.75rem;"></div>
+                </div>
+                
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">산업별 스택 (GET /stats/industry)</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <input type="text" id="ind-names" class="input-control" value="fintech">
+                        <button class="btn btn-primary" onclick="doGetIndStats()">조회</button>
+                    </div>
+                    <div id="stat-industry" style="font-size: 0.75rem;"></div>
+                </div>
+
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">트렌드 추이 (GET /stats/trend)</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <input type="text" id="trend-skill" class="input-control" value="Rust">
+                        <button class="btn btn-primary" onclick="doGetTrend()">조회</button>
+                    </div>
+                    <div id="stat-trend" style="font-size: 0.75rem;"></div>
+                </div>
+                
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">상승세 (Rising) & 뉴스</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <button class="btn btn-primary btn-sm" onclick="doGetRising()">GET /trend/rising</button>
+                        <button class="btn btn-primary btn-sm" onclick="doGetNews()">GET /news</button>
+                    </div>
+                    <div id="stat-misc" style="font-size: 0.75rem; max-height: 150px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">기술 요구 기업 (GET /company/by-skill)</h3>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <input type="text" id="comp-skill" class="input-control" value="Kotlin">
+                        <button class="btn btn-primary btn-sm" onclick="doGetCompany()">조회</button>
+                    </div>
+                    <div id="stat-comp" style="font-size: 0.75rem; max-height: 150px; overflow-y: auto;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= View 5: Jobs Search ================= -->
+        <div id="view-jobs" class="view-section">
+            <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                <div style="flex:2; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">공고 검색 (GET /postings)</h3>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+                        <select id="job-pool" class="input-control" style="width:100px;"><option value="global">글로벌 (global)</option><option value="domestic">국내 (domestic)</option></select>
+                        <select id="job-pos" class="input-control" style="width:120px;"><option value="backend">backend</option><option value="frontend">frontend</option></select>
+                        <select id="job-sort" class="input-control" style="width:100px;"><option value="latest">최신순</option><option value="deadline">마감임박순</option></select>
+                        <label style="font-size: 0.8rem; display: flex; align-items: center; gap: 4px;"><input type="checkbox" id="job-match"> 일치하는 공고만</label>
+                        <button class="btn btn-primary" onclick="doSearchJobs()">검색</button>
+                    </div>
+                    <div id="job-list" style="font-size: 0.75rem; max-height: 200px; overflow-y: auto;"></div>
+                </div>
+                
+                <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">채용 지도 (GET /postings/map)</h3>
+                    <button class="btn btn-primary btn-sm" onclick="doGetMap()">지도 데이터 불러오기</button>
+                    <div id="job-map" style="font-size: 0.75rem; margin-top: 0.5rem;"></div>
+                </div>
+            </div>
+            
+            <div style="background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
+                <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">공고 상세 (위 검색 결과에서 선택)</h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.8rem; font-weight:600;">선택된 공고 ID: </span>
+                    <input type="text" id="selected-job-id" class="input-control" style="width: 80px;" readonly>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm" onclick="doGetJobDetail()">기본 상세정보 (GET /{id})</button>
+                    <button class="btn btn-sm" onclick="doGetSimilar()">유사 공고 추천 (GET /{id}/similar)</button>
+                    <button class="btn btn-sm" style="color: var(--accent); border-color: var(--accent);" onclick="doJobAnalysis()">AI 공고 분석 요약 (GET /{id}/analysis)</button>
+                </div>
+                <div id="job-action-res" style="font-size: 0.75rem; margin-top: 0.5rem; max-height: 150px; overflow-y: auto;"></div>
+            </div>
+        </div>
+
+        <!-- ================= View 6: AI Assistant ================= -->
+        <div id="view-ai" class="view-section">
+            <div style="display: flex; gap: 1rem; height: 450px;">
+                <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius); display: flex; flex-direction: column;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-comments"></i> 커리어 챗봇 (POST /chat)</h3>
+                    <div id="chat-box" class="chat-container" style="flex-grow: 1;">
+                        <div class="chat-msg ai">안녕하세요! 통계나 커리어 조언에 대해 무엇이든 물어보세요.</div>
+                    </div>
+                    <div class="chat-input-area">
+                        <select id="chat-pool" class="input-control" style="width: 80px;"><option value="global">global</option><option value="domestic">domestic</option></select>
+                        <input type="text" id="chat-input" class="input-control" placeholder="메시지를 입력하세요..." onkeypress="if(event.key==='Enter') doSendChat()">
+                        <button class="btn btn-primary" onclick="doSendChat()">전송</button>
+                    </div>
+                </div>
+                
+                <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius); display: flex; flex-direction: column;">
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-user-pen"></i> 이력서 피드백 (POST /resume/feedback)</h3>
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">이력서 관리 탭에서 임시 세션이나 이력서를 먼저 선택해야 합니다.</p>
+                    <button class="btn btn-primary btn-sm" onclick="doResumeFeedback()">AI 피드백 및 모의질문 생성</button>
+                    <div id="feedback-res" style="margin-top: 1rem; font-size: 0.75rem; overflow-y: auto; flex-grow: 1;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= View 7: Admin Panel ================= -->
+        <div id="view-admin" class="view-section">
+            <div class="mock-form-container" style="background: var(--input-bg); margin: 0 auto;">
+                <h3 style="font-size: 0.9rem; margin-bottom: 1rem; color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> 수집기(Collector) 파이프라인 관리</h3>
+                
+                <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="doAdminStatus()">수집기 상태 조회 (GET /admin/collector/status)</button>
+                <div id="admin-status-res" style="font-family: monospace; font-size: 0.75rem; margin-bottom: 1rem; background: var(--panel-bg); padding: 0.5rem; border-radius: 4px;"></div>
+                
+                <hr style="border:0; border-top: 1px solid var(--panel-border); margin-bottom: 1rem;">
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="text" id="admin-source" class="input-control" placeholder="소스 (예: himalayas) 입력. 비우면 전체 실행">
+                    <button class="btn" style="color: var(--danger); border-color: var(--danger);" onclick="doAdminRun()">수동 실행 트리거 (POST /admin/collector/run)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Log Panel -->
+    <div class="easy-log-panel glass-panel">
+        <div class="panel-header" style="background: #000; border-bottom: 1px solid #333;">
+            <span style="color: #fff;"><i class="fa-solid fa-terminal" style="margin-right: 0.5rem;"></i>디버그 콘솔 (Debug Console)</span>
+            <button class="btn btn-icon btn-sm" onclick="clearLogs()" style="border:none;"><i class="fa-solid fa-trash"></i></button>
+        </div>
+        <div id="debug-console" style="flex-grow: 1; overflow-y: auto; padding: 0.5rem; background: #0a0a0a; color: #a3a3a3;">
+            <div style="font-family: monospace; font-size: 0.75rem; color: #555;">Ready. 어떤 화면에서든 버튼을 누르면 API 호출 내역이 이곳에 기록됩니다.</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/easy_dash.js"></script>
+{% endblock %}

@@ -1,0 +1,75 @@
+{% extends "layout.html" %}
+
+{% block page_title %}API Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Left column: API Selection & Input -->
+    <div class="api-selection-panel glass-panel">
+        <div class="panel-header">
+            <h3>Endpoints</h3>
+            <div class="search-box">
+                <i class="fa-solid fa-search"></i>
+                <input type="text" id="apiSearch" placeholder="Search APIs...">
+            </div>
+        </div>
+        
+        <div class="api-list-container" id="apiList">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <!-- Center column: Request Configuration -->
+    <div class="request-panel glass-panel">
+        <div class="panel-header">
+            <h3>Request Configuration</h3>
+            <span id="selectedApiBadge" class="badge">Select an API</span>
+        </div>
+        <form id="requestForm" class="request-form">
+            <div id="requestPathContainer" class="form-group" style="display: none;">
+                <h4>Path Parameters</h4>
+                <div id="pathParams"></div>
+            </div>
+            
+            <div id="requestQueryContainer" class="form-group" style="display: none;">
+                <h4>Query Parameters</h4>
+                <div id="queryParams"></div>
+            </div>
+            
+            <div id="requestBodyContainer" class="form-group" style="display: none;">
+                <h4>Request Body (JSON)</h4>
+                <textarea id="requestBody" class="input-control" rows="8" style="font-family: monospace;"></textarea>
+            </div>
+            
+            <div id="requestFileContainer" class="form-group" style="display: none;">
+                <h4>File Upload (multipart/form-data)</h4>
+                <input type="file" id="requestFile" class="input-control" accept=".pdf">
+            </div>
+
+            <div class="form-actions" style="margin-top: 1rem; border-top: 1px solid var(--panel-border); padding-top: 1rem;">
+                <button type="submit" class="btn btn-primary" id="sendRequestBtn" disabled>
+                    <i class="fa-solid fa-paper-plane"></i> Send Request
+                </button>
+                <button type="button" class="btn" id="setTokenBtn" style="margin-left: 0.5rem;" title="Use this response as Auth Token" disabled>
+                    <i class="fa-solid fa-key"></i> Set Token
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Right column: Response View -->
+    <div class="response-panel glass-panel">
+        <div class="panel-header" style="justify-content: space-between;">
+            <h3>Response</h3>
+            <div class="status-indicator" id="responseStatus">---</div>
+        </div>
+        <div class="response-content" id="responseContentContainer">
+            <pre><code id="responseBody">Awaiting request...</code></pre>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/api_test.js"></script>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Database Viewer{% endblock %}
+
+{% block content %}
+<div class="db-grid">
+    <!-- Left sidebar: Tables -->
+    <div class="tables-panel glass-panel">
+        <div class="panel-header">
+            <h3>Tables</h3>
+            <button class="btn btn-sm btn-icon" id="refreshTablesBtn">
+                <i class="fa-solid fa-rotate-right"></i>
+            </button>
+        </div>
+        <ul class="table-list" id="tableList">
+            <li class="table-item"><span class="text-muted">Loading tables...</span></li>
+        </ul>
+    </div>
+
+    <!-- Main area: Table Data -->
+    <div class="data-panel glass-panel">
+        <div class="panel-header" style="justify-content: space-between;">
+            <h3 id="currentTableName">Select a table</h3>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span id="rowCount" class="text-muted" style="font-size: 0.85rem; margin-right: 1rem;"></span>
+                <select id="limitSelect" class="input-control" style="width: auto; padding: 0.25rem 0.5rem;">
+                    <option value="10">10 rows</option>
+                    <option value="50" selected>50 rows</option>
+                    <option value="100">100 rows</option>
+                    <option value="500">500 rows</option>
+                </select>
+                <button class="btn btn-primary btn-sm" id="refreshDataBtn" disabled>
+                    <i class="fa-solid fa-rotate-right"></i> Refresh
+                </button>
+            </div>
+        </div>
+        <div class="table-container">
+            <table class="data-table" id="dataTable">
+                <thead>
+                    <tr id="tableHeaders"></tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td class="text-muted" style="padding: 2rem; text-align: center;">Select a table from the sidebar to view data</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/db_viewer.js"></script>
+{% endblock %}
