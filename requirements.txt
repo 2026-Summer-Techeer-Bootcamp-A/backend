@@ -7,3 +7,5 @@ psycopg[binary]>=3.2,<3.3
 pgvector>=0.3,<0.4
 bcrypt
 faker
+jinja2
+python-multipart

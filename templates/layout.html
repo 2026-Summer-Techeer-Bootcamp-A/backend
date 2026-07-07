@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Career Backend API Dashboard</title>
+    <!-- Google Fonts: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-cube brand-icon"></i>
+                <span>API Portal</span>
+            </div>
+            
+            <nav class="nav-menu">
+                <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">
+                    <i class="fa-solid fa-house"></i> Home
+                </a>
+                <a href="/easy-dash" class="nav-link {% if request.url.path == '/easy-dash' %}active{% endif %}">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Easy Dash
+                </a>
+                <a href="/test-ui" class="nav-link {% if request.url.path == '/test-ui' %}active{% endif %}">
+                    <i class="fa-solid fa-code"></i> API Dashboard
+                </a>
+                <a href="/db-viewer" class="nav-link {% if request.url.path == '/db-viewer' %}active{% endif %}">
+                    <i class="fa-solid fa-database"></i> DB Viewer
+                </a>
+            </nav>
+            
+            <div class="auth-status" id="authStatusIndicator" style="position: relative; cursor: help;">
+                <div class="status-dot" id="authDot"></div>
+                <span id="authText">Not Authenticated</span>
+                <div class="auth-tooltip">
+                    <strong>[Easy Dash]</strong>의 인증 메뉴나 <strong>[API Dashboard]</strong>에서 로그인을 진행하여 JWT 토큰을 발급받으면 활성화됩니다. (어느 곳에서든 한 번 로그인하면 연동됩니다.)
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="topbar">
+                <div class="page-title">{% block page_title %}Dashboard{% endblock %}</div>
+                <div class="topbar-actions">
+                    <button class="btn btn-icon theme-toggle" id="themeToggle" title="Toggle Theme">
+                        <i class="fa-solid fa-moon"></i>
+                    </button>
+                </div>
+            </header>
+            
+            <div class="content-wrapper">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        const toggleBtn = document.getElementById('themeToggle');
+        toggleBtn.addEventListener('click', () => {
+            document.body.classList.toggle('light-mode');
+            const icon = toggleBtn.querySelector('i');
+            if (document.body.classList.contains('light-mode')) {
+                icon.classList.remove('fa-moon');
+                icon.classList.add('fa-sun');
+            } else {
+                icon.classList.remove('fa-sun');
+                icon.classList.add('fa-moon');
+            }
+        });
+
+        function updateAuthStatus() {
+            const token = localStorage.getItem('access_token');
+            const dot = document.getElementById('authDot');
+            const text = document.getElementById('authText');
+            if(token) {
+                dot.classList.add('auth');
+                text.textContent = 'Authenticated';
+            } else {
+                dot.classList.remove('auth');
+                text.textContent = 'Not Authenticated';
+            }
+        }
+        updateAuthStatus();
+        window.addEventListener('storage', updateAuthStatus);
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
