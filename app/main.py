@@ -1,20 +1,18 @@
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request, HTTPException
 from sqlalchemy import inspect, text
-from app.core.db import engine
 
+import app.models  # noqa: F401
 from app.core.config import settings
-from app.core.db import get_session, engine
+from app.core.db import engine
 from app.core.db import Base
-from app.models import Person, __init__ as models_init
 from app.routers.auth import router as auth_router
+from app.routers.resume import router as resume_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -41,6 +39,7 @@ templates = Jinja2Templates(directory=templates_dir)
 # TODO: configure structured JSON logging.
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
 
 
 class PersonOut(BaseModel):

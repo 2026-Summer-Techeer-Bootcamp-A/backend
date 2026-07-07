@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 import jwt
 from jwt.exceptions import InvalidTokenError
 
-from app.core.config import settings
 from app.core.db import get_session
 from app.core.security import ALGORITHM, SECRET_KEY
 from app.core.redis import is_token_blocklisted

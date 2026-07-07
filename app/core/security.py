@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
-from app.core.config import settings
 
 # 개발용 임시 시크릿 키. 실제 운영 환경에서는 환경 변수(settings)에서 가져와야 함.
 SECRET_KEY = "dummy-secret-key-for-dev"
