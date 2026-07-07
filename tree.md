@@ -6,8 +6,14 @@
 backend/
 ├── app/                          # FastAPI 백엔드 패키지
 │   ├── main.py                   # FastAPI 인스턴스 생성, 라우터 include
-│   ├── models.py                  # SQLAlchemy ORM 모델 (테이블 하나당 클래스 하나)
-│   │                                #  ※ ERD 기준 테이블 15개 -> 다 채우면 models/ 패키지 분리 고려
+│   ├── models/                     # SQLAlchemy ORM 모델 패키지 (ERD 15테이블 + person 플레이스홀더)
+│   │   ├── mixins.py                #   TimestampMixin/SoftDeleteMixin — created_at·is_deleted·deleted_at 공통 규약
+│   │   ├── person.py                #   인프라 뼈대 단계 플레이스홀더 (실제 도메인 테이블 아님, main.py/seed.py가 아직 씀)
+│   │   ├── user.py, resume.py       #   User / Resume·ResumeSkill·ResumeCert
+│   │   ├── posting.py               #   Posting·RawPosting·PostingTech·PostingCert·PostingCategory·PostingEmbedding
+│   │   ├── skill.py, cert.py        #   Skill·SkillAlias / Cert
+│   │   ├── job_category.py, interest_signal.py
+│   │   └── __init__.py              #   전 모델 re-export (`from app.models import X`)
 │   │
 │   ├── core/                      # 앱 전역 인프라 설정
 │   │   ├── config.py              # pydantic-settings 환경변수 (Settings)
@@ -93,7 +99,7 @@ backend/
 - **schemas**: pydantic 요청/응답 모델. `models.py`(DB)와는 분리.
 - **services**: 실제 비즈니스 로직 — 특히 `match.py`가 이 제품의 핵심(커버리지/갭/what-if 산식). 여러 crud 조합, 검증 규칙, LLM degraded 폴백 등도 여기.
 - **crud**: DB 세션 받아서 단순 쿼리만 수행.
-- **models.py**: SQLAlchemy ORM. `posting`, `skill`, `resume`, `user` 등 15테이블.
+- **models/**: SQLAlchemy ORM. `posting`, `skill`, `resume`, `user` 등 15테이블 + `person`(플레이스홀더). CITEXT/JSONB/pgvector 타입은 `.with_variant(..., "postgresql")`로 감싸서 테스트용 SQLite에서도 `create_all`이 깨지지 않게 해둠.
 - **app/schema/** (SQL): `schemas/`(pydantic)와 이름이 비슷하지만 다른 용도 — DB DDL 원본. 지금 든 `001_person.sql`은 인프라 뼈대 단계 플레이스홀더고, 실제 스키마는 `erd-f2.sql` 기준(한글 테이블명 → 논리 영문명 매핑은 04-erd.md 참고)으로 다시 짜야 함.
 - **collector**: 채용공고(himalayas/hn/jumpit/wanted/wwr)와 관심 시그널(GitHub/HN)을 모으는 배치 스크립트 묶음. **FastAPI 요청 경로와 무관** — GCP VM에서 systemd 타이머로 따로 돔. 기존 `gh-hn-data-collector` 레포의 동일 이름 폴더가 실제 구현 레퍼런스.
 - **alembic/**: DB 마이그레이션 이력 관리. 지금은 `app/schema/*.sql` + `scripts/seed.py`로 수동 관리 중인데, 15테이블 스키마가 들어오면 alembic으로 전환 예정.
@@ -111,4 +117,4 @@ backend/
 
 - **taxonomy_v2.json을 앱이 어떻게 읽나**: 이력서 정규화(F1)도 같은 사전을 써야 하는데, `collector/taxonomy_v2.json`을 앱이 직접 import해서 읽을지, 아니면 이 JSON을 최초 1회 `skill`/`skill_alias` 테이블에 적재해두고 앱은 DB만 보는 방식일지 아직 결정 안 됨. (DB만 보는 쪽이 API 서버 입장에선 더 깔끔해 보임 — 다음에 확정 필요.)
 - **mart.db(SQLite) → PostgreSQL 1회 이관 스크립트**의 정확한 위치/이름 (`scripts/migrate_mart.py` 정도로 예상, 아직 안 정함).
-- **models.py를 언제 models/ 패키지로 쪼갤지**: 지금은 Person 하나뿐이라 파일 하나로 충분하지만, 15테이블이 다 들어오면 분리하는 게 나을 수 있음. 실제 구현 시작할 때 결정.
+- **실제 DB 마이그레이션(alembic/`app/schema/*.sql`)은 아직 안 만듦**: `app/models/`는 채워졌지만, 이 모델대로 실제 Postgres 테이블을 만드는 마이그레이션은 다음 단계.
