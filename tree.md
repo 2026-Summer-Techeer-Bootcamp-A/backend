@@ -24,17 +24,17 @@ backend/
 │   ├── schema/                     # DB 마이그레이션용 원본 SQL (DDL)
 │   │   └── NNN_*.sql                #  플레이스홀더
 │   │
-│   ├── routers/                    # [예정] 라우터 계층 — API 명세(34개 엔드포인트)를 도메인별로 분리
-│   │   ├── auth.py                  #   /auth/signup, /auth/login, /auth/logout, /auth/me
-│   │   ├── resume.py                #   /resume/parse, /resume/confirm, /resume (CRUD)
-│   │   ├── match.py                 #   /match/coverage, /match/gap, /match/what-if  (F2~F4, 히어로)
-│   │   ├── stats.py                 #   /stats/skills, /stats/cooccurrence, /stats/industry, /stats/trend
-│   │   ├── cert.py                  #   /cert/gap
-│   │   ├── company.py               #   /company/by-skill  (과거 vs 현재 + 응답률)
-│   │   ├── postings.py              #   /postings, /postings/{id}, /postings/map, /postings/{id}/similar
-│   │   ├── trend.py                 #   /trend/rising  (뜨는 기술 배지)
-│   │   ├── meta.py                  #   /skills, /job-categories, /industries, /certs (자동완성류, 전부 미인증)
-│   │   └── llm.py                   #   /resume/feedback, /news, /chat — 서브 기능, 실패해도 본체 무영향
+│   ├── routers/                    # [예정] 라우터 계층 — API 명세(34개 엔드포인트)를 도메인별로 분리 (모두 /api/v1/ 접두어 사용)
+│   │   ├── auth.py                  #   /api/v1/auth/signup, /api/v1/auth/login, /api/v1/auth/logout, /api/v1/auth/me
+│   │   ├── resume.py                #   /api/v1/resume/parse, /api/v1/resume/confirm, /api/v1/resume (CRUD)
+│   │   ├── match.py                 #   /api/v1/match/coverage, /api/v1/match/gap, /api/v1/match/what-if  (F2~F4, 히어로)
+│   │   ├── stats.py                 #   /api/v1/stats/skills, /api/v1/stats/cooccurrence, /api/v1/stats/industry, /api/v1/stats/trend
+│   │   ├── cert.py                  #   /api/v1/cert/gap
+│   │   ├── company.py               #   /api/v1/company/by-skill  (과거 vs 현재 + 응답률)
+│   │   ├── postings.py              #   /api/v1/postings, /api/v1/postings/{id}, /api/v1/postings/map, /api/v1/postings/{id}/similar
+│   │   ├── trend.py                 #   /api/v1/trend/rising  (뜨는 기술 배지)
+│   │   ├── meta.py                  #   /api/v1/skills, /api/v1/job-categories, /api/v1/industries, /api/v1/certs (자동완성류, 전부 미인증)
+│   │   └── llm.py                   #   /api/v1/resume/feedback, /api/v1/news, /api/v1/chat — 서브 기능, 실패해도 본체 무영향
 │   │
 │   ├── schemas/                     # [예정] pydantic 요청/응답 모델 — routers와 1:1 대응 파일 분리
 │   │   └── (auth / resume / match / stats / cert / company / postings / trend / meta / llm).py

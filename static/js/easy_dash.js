@@ -67,7 +67,8 @@ async function fetchApi(method, path, body = null, isMultipart = false) {
     }
     
     try {
-        const res = await fetch(path, options);
+        const full_path = path.startsWith("/api/v1") ? path : "/api/v1" + path;
+        const res = await fetch(full_path, options);
         const isJson = res.headers.get('content-type')?.includes('application/json');
         const resData = isJson ? await res.json() : await res.text();
         logAction(method, path, body, res.status, resData);

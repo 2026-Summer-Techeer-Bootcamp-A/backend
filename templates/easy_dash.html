@@ -48,8 +48,8 @@
                         <input type="password" id="login-pass" class="input-control" value="password">
                     </div>
                     <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-primary" style="flex:1;" onclick="doLogin()">로그인 (POST /auth/login)</button>
-                        <button class="btn" onclick="doLogout()">로그아웃 (POST /auth/logout)</button>
+                        <button class="btn btn-primary" style="flex:1;" onclick="doLogin()">로그인 (POST /api/v1/auth/login)</button>
+                        <button class="btn" onclick="doLogout()">로그아웃 (POST /api/v1/auth/logout)</button>
                     </div>
                 </div>
 
@@ -67,11 +67,11 @@
                         <label>닉네임 (Nickname)</label>
                         <input type="text" id="signup-nick" class="input-control">
                     </div>
-                    <button class="btn" style="width: 100%;" onclick="doSignup()">회원가입 (POST /auth/signup)</button>
+                    <button class="btn" style="width: 100%;" onclick="doSignup()">회원가입 (POST /api/v1/auth/signup)</button>
                 </div>
             </div>
             <div style="margin-top: 1rem;">
-                <button class="btn" onclick="doGetMe()">내 정보 조회 (GET /auth/me)</button>
+                <button class="btn" onclick="doGetMe()">내 정보 조회 (GET /api/v1/auth/me)</button>
                 <div id="me-result" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.8rem; background: var(--input-bg); padding: 0.5rem;">(불러오지 않음)</div>
             </div>
         </div>
@@ -79,7 +79,7 @@
         <!-- ================= View 2: Resume Manager ================= -->
         <div id="view-resume" class="view-section">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <button class="btn" onclick="doLoadResumes()">내 이력서 목록 불러오기 (GET /resume)</button>
+                <button class="btn" onclick="doLoadResumes()">내 이력서 목록 불러오기 (GET /api/v1/resume)</button>
                 <span id="current-resume-display" style="font-weight: 600; color: var(--primary);">현재 선택: 없음</span>
             </div>
             <div id="resume-list" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;"></div>
@@ -89,7 +89,7 @@
                 <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
                     <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">1. 이력서 파싱 (PDF)</h3>
                     <input type="file" id="resume-file" accept=".pdf" class="input-control" style="margin-bottom: 0.5rem;">
-                    <button class="btn btn-primary btn-sm" style="width: 100%" onclick="doParseResume()">업로드 및 스킬 추출 (POST /resume/parse)</button>
+                    <button class="btn btn-primary btn-sm" style="width: 100%" onclick="doParseResume()">업로드 및 스킬 추출 (POST /api/v1/resume/parse)</button>
                     <div id="parsed-skills-list" style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); max-height: 100px; overflow-y: auto;"></div>
                 </div>
                 
@@ -99,7 +99,7 @@
                         <label>풀 (Pool)</label>
                         <select id="resume-pool" class="input-control"><option value="global">글로벌 (global)</option><option value="domestic">국내 (domestic)</option></select>
                     </div>
-                    <button class="btn btn-primary btn-sm" style="width: 100%" onclick="doConfirmResume()">임시 세션 발급 (POST /resume/confirm)</button>
+                    <button class="btn btn-primary btn-sm" style="width: 100%" onclick="doConfirmResume()">임시 세션 발급 (POST /api/v1/resume/confirm)</button>
                     <div id="session-display" style="margin-top: 0.5rem; font-family: monospace; font-size: 0.75rem; color: var(--warning); word-break: break-all;"></div>
                 </div>
                 
@@ -109,16 +109,16 @@
                         <label>이력서 제목 (Title)</label>
                         <input type="text" id="resume-title" class="input-control" placeholder="예: 2026 백엔드 지원용">
                     </div>
-                    <button class="btn btn-sm" style="width: 100%; border-color: var(--success); color: var(--success);" onclick="doSaveResume()">저장 (POST /resume)</button>
+                    <button class="btn btn-sm" style="width: 100%; border-color: var(--success); color: var(--success);" onclick="doSaveResume()">저장 (POST /api/v1/resume)</button>
                 </div>
             </div>
             
             <div style="margin-top: 1rem; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
                 <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">선택된 이력서 관리</h3>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button class="btn btn-sm" onclick="doGetResume()">상세 보기 (GET /resume/{id})</button>
-                    <button class="btn btn-sm" onclick="doUpdateResume()">수정 (PUT /resume/{id})</button>
-                    <button class="btn btn-sm" style="color: var(--danger); border-color: var(--danger);" onclick="doDeleteResume()">삭제 (DELETE /resume/{id})</button>
+                    <button class="btn btn-sm" onclick="doGetResume()">상세 보기 (GET /api/v1/resume/{id})</button>
+                    <button class="btn btn-sm" onclick="doUpdateResume()">수정 (PUT /api/v1/resume/{id})</button>
+                    <button class="btn btn-sm" style="color: var(--danger); border-color: var(--danger);" onclick="doDeleteResume()">삭제 (DELETE /api/v1/resume/{id})</button>
                 </div>
             </div>
         </div>
@@ -177,27 +177,27 @@
             <!-- Autocompletes -->
             <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; overflow-x: auto; padding-bottom: 0.5rem;">
                 <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
-                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">기술 사전 (GET /skills)</h4>
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">기술 사전 (GET /api/v1/skills)</h4>
                     <input type="text" class="input-control" placeholder="검색어 입력..." oninput="doGetSkills(this.value)">
                     <div id="ac-skills" style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;"></div>
                 </div>
                 <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
-                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">직무 필터 (GET /job-categories)</h4>
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">직무 필터 (GET /api/v1/job-categories)</h4>
                     <button class="btn btn-sm" onclick="doGetJobs()">목록 불러오기</button>
                 </div>
                 <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
-                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">산업 필터 (GET /industries)</h4>
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">산업 필터 (GET /api/v1/industries)</h4>
                     <button class="btn btn-sm" onclick="doGetIndustries()">목록 불러오기</button>
                 </div>
                 <div style="background: var(--input-bg); padding: 0.5rem; border-radius: var(--radius); flex: 1; min-width: 150px;">
-                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">자격증 사전 (GET /certs)</h4>
+                    <h4 style="font-size: 0.75rem; margin-bottom: 0.25rem;">자격증 사전 (GET /api/v1/certs)</h4>
                     <input type="text" class="input-control" placeholder="검색어 입력..." oninput="doGetCerts(this.value)">
                 </div>
             </div>
 
             <div style="display: flex; flex-wrap: wrap; gap: 1rem;">
                 <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">기술 점유율 (GET /stats/skills)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">기술 점유율 (GET /api/v1/stats/skills)</h3>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                         <select id="stat-pool" class="input-control"><option value="global">글로벌 (global)</option><option value="domestic">국내 (domestic)</option></select>
                         <select id="stat-pos" class="input-control"><option value="backend">backend</option><option value="frontend">frontend</option></select>
@@ -207,7 +207,7 @@
                 </div>
 
                 <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">동시 출현 (GET /stats/cooccurrence)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">동시 출현 (GET /api/v1/stats/cooccurrence)</h3>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                         <input type="text" id="co-skill" class="input-control" value="Python">
                         <button class="btn btn-primary" onclick="doGetCooccur()">조회</button>
@@ -216,7 +216,7 @@
                 </div>
                 
                 <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">산업별 스택 (GET /stats/industry)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">산업별 스택 (GET /api/v1/stats/industry)</h3>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                         <input type="text" id="ind-names" class="input-control" value="fintech">
                         <button class="btn btn-primary" onclick="doGetIndStats()">조회</button>
@@ -225,7 +225,7 @@
                 </div>
 
                 <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">트렌드 추이 (GET /stats/trend)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">트렌드 추이 (GET /api/v1/stats/trend)</h3>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                         <input type="text" id="trend-skill" class="input-control" value="Rust">
                         <button class="btn btn-primary" onclick="doGetTrend()">조회</button>
@@ -243,7 +243,7 @@
                 </div>
 
                 <div class="mock-form-container" style="flex: 1 1 300px; background: var(--input-bg); margin:0;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">기술 요구 기업 (GET /company/by-skill)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">기술 요구 기업 (GET /api/v1/company/by-skill)</h3>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
                         <input type="text" id="comp-skill" class="input-control" value="Kotlin">
                         <button class="btn btn-primary btn-sm" onclick="doGetCompany()">조회</button>
@@ -257,7 +257,7 @@
         <div id="view-jobs" class="view-section">
             <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
                 <div style="flex:2; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">공고 검색 (GET /postings)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">공고 검색 (GET /api/v1/postings)</h3>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
                         <select id="job-pool" class="input-control" style="width:100px;"><option value="global">글로벌 (global)</option><option value="domestic">국내 (domestic)</option></select>
                         <select id="job-pos" class="input-control" style="width:120px;"><option value="backend">backend</option><option value="frontend">frontend</option></select>
@@ -269,7 +269,7 @@
                 </div>
                 
                 <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius);">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">채용 지도 (GET /postings/map)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;">채용 지도 (GET /api/v1/postings/map)</h3>
                     <button class="btn btn-primary btn-sm" onclick="doGetMap()">지도 데이터 불러오기</button>
                     <div id="job-map" style="font-size: 0.75rem; margin-top: 0.5rem;"></div>
                 </div>
@@ -282,9 +282,9 @@
                     <input type="text" id="selected-job-id" class="input-control" style="width: 80px;" readonly>
                 </div>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button class="btn btn-sm" onclick="doGetJobDetail()">기본 상세정보 (GET /{id})</button>
-                    <button class="btn btn-sm" onclick="doGetSimilar()">유사 공고 추천 (GET /{id}/similar)</button>
-                    <button class="btn btn-sm" style="color: var(--accent); border-color: var(--accent);" onclick="doJobAnalysis()">AI 공고 분석 요약 (GET /{id}/analysis)</button>
+                    <button class="btn btn-sm" onclick="doGetJobDetail()">기본 상세정보 (GET /api/v1/{id})</button>
+                    <button class="btn btn-sm" onclick="doGetSimilar()">유사 공고 추천 (GET /api/v1/{id}/similar)</button>
+                    <button class="btn btn-sm" style="color: var(--accent); border-color: var(--accent);" onclick="doJobAnalysis()">AI 공고 분석 요약 (GET /api/v1/{id}/analysis)</button>
                 </div>
                 <div id="job-action-res" style="font-size: 0.75rem; margin-top: 0.5rem; max-height: 150px; overflow-y: auto;"></div>
             </div>
@@ -294,7 +294,7 @@
         <div id="view-ai" class="view-section">
             <div style="display: flex; gap: 1rem; height: 450px;">
                 <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius); display: flex; flex-direction: column;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-comments"></i> 커리어 챗봇 (POST /chat)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-comments"></i> 커리어 챗봇 (POST /api/v1/chat)</h3>
                     <div id="chat-box" class="chat-container" style="flex-grow: 1;">
                         <div class="chat-msg ai">안녕하세요! 통계나 커리어 조언에 대해 무엇이든 물어보세요.</div>
                     </div>
@@ -306,7 +306,7 @@
                 </div>
                 
                 <div style="flex:1; background: var(--input-bg); padding: 1rem; border-radius: var(--radius); display: flex; flex-direction: column;">
-                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-user-pen"></i> 이력서 피드백 (POST /resume/feedback)</h3>
+                    <h3 style="font-size: 0.9rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-user-pen"></i> 이력서 피드백 (POST /api/v1/resume/feedback)</h3>
                     <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">이력서 관리 탭에서 임시 세션이나 이력서를 먼저 선택해야 합니다.</p>
                     <button class="btn btn-primary btn-sm" onclick="doResumeFeedback()">AI 피드백 및 모의질문 생성</button>
                     <div id="feedback-res" style="margin-top: 1rem; font-size: 0.75rem; overflow-y: auto; flex-grow: 1;"></div>
@@ -319,13 +319,13 @@
             <div class="mock-form-container" style="background: var(--input-bg); margin: 0 auto;">
                 <h3 style="font-size: 0.9rem; margin-bottom: 1rem; color: var(--danger);"><i class="fa-solid fa-triangle-exclamation"></i> 수집기(Collector) 파이프라인 관리</h3>
                 
-                <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="doAdminStatus()">수집기 상태 조회 (GET /admin/collector/status)</button>
+                <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;" onclick="doAdminStatus()">수집기 상태 조회 (GET /api/v1/admin/collector/status)</button>
                 <div id="admin-status-res" style="font-family: monospace; font-size: 0.75rem; margin-bottom: 1rem; background: var(--panel-bg); padding: 0.5rem; border-radius: 4px;"></div>
                 
                 <hr style="border:0; border-top: 1px solid var(--panel-border); margin-bottom: 1rem;">
                 <div style="display: flex; gap: 0.5rem;">
                     <input type="text" id="admin-source" class="input-control" placeholder="소스 (예: himalayas) 입력. 비우면 전체 실행">
-                    <button class="btn" style="color: var(--danger); border-color: var(--danger);" onclick="doAdminRun()">수동 실행 트리거 (POST /admin/collector/run)</button>
+                    <button class="btn" style="color: var(--danger); border-color: var(--danger);" onclick="doAdminRun()">수동 실행 트리거 (POST /api/v1/admin/collector/run)</button>
                 </div>
             </div>
         </div>
