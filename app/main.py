@@ -15,6 +15,7 @@ from app.core.db import get_session, engine
 from app.core.db import Base
 from app.models import Person, __init__ as models_init
 from app.routers.auth import router as auth_router
+from app.routers.cert import router as cert_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ templates = Jinja2Templates(directory=templates_dir)
 # TODO: configure structured JSON logging.
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(cert_router, prefix="/api/v1", tags=["cert"])
 
 
 class PersonOut(BaseModel):
