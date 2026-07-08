@@ -1,9 +1,16 @@
 from datetime import date
+from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 
 from app.core.deps import SessionDep
-from app.crud.cert import count_matching_postings, get_owned_cert_names, get_required_cert_stats, search_certs
+from app.crud.cert import (
+    count_matching_postings,
+    get_owned_cert_names,
+    get_required_cert_stats,
+    resume_exists,
+    search_certs,
+)
 from app.schemas.cert import CertGapItem, CertGapResponse, CertItem, CertListResponse, CertRequirementItem
 
 
@@ -20,9 +27,12 @@ def get_certs(session: SessionDep, q: str | None = None) -> CertListResponse:
 def get_cert_gap(
     session: SessionDep,
     resume_id: int,
-    pool: str,
+    pool: Literal["domestic", "global"],
     position: str,
 ) -> CertGapResponse:
+    if not resume_exists(session, resume_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found")
+
     sample_size = count_matching_postings(session, pool, position)
     owned_names = get_owned_cert_names(session, resume_id)
     owned_name_set = set(owned_names)

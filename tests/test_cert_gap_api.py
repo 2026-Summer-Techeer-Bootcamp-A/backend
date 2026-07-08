@@ -80,3 +80,29 @@ def test_get_cert_gap_by_resume_id(client: TestClient) -> None:
         "as_of": "2026-07-08",
         "sample_size": 2,
     }
+
+
+def test_get_cert_gap_returns_404_for_unknown_resume(client: TestClient) -> None:
+    response = client.get("/api/v1/cert/gap?resume_id=999&pool=domestic&position=Developer")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Resume not found"}
+
+
+def test_get_cert_gap_rejects_invalid_pool(client: TestClient) -> None:
+    response = client.get("/api/v1/cert/gap?resume_id=1&pool=invalid&position=Developer")
+
+    assert response.status_code == 422
+
+
+def test_get_cert_gap_returns_empty_gap_when_no_matching_postings(client: TestClient) -> None:
+    response = client.get("/api/v1/cert/gap?resume_id=1&pool=global&position=Developer")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "required": [],
+        "owned": [{"name": "AWS Certified Developer"}],
+        "gap": [],
+        "as_of": "2026-07-08",
+        "sample_size": 0,
+    }

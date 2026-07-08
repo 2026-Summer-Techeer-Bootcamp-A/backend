@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Cert, Posting, PostingCategory, PostingCert, ResumeCert
+from app.models import Cert, Posting, PostingCategory, PostingCert, Resume, ResumeCert
 
 
 def search_certs(session: Session, q: str | None = None, limit: int = 20) -> list[Cert]:
@@ -12,6 +12,14 @@ def search_certs(session: Session, q: str | None = None, limit: int = 20) -> lis
 
     stmt = stmt.order_by(Cert.name).limit(limit)
     return list(session.execute(stmt).scalars().all())
+
+
+def resume_exists(session: Session, resume_id: int) -> bool:
+    stmt = select(Resume.resume_id).where(
+        Resume.resume_id == resume_id,
+        Resume.is_deleted.is_(False),
+    )
+    return session.execute(stmt).first() is not None
 
 
 def get_owned_cert_names(session: Session, resume_id: int) -> list[str]:
