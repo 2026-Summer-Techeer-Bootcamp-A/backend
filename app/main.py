@@ -14,6 +14,7 @@ from app.core.db import Base
 from app.routers.auth import router as auth_router
 from app.routers.resume import router as resume_router
 from app.routers.skills import router as skills_router
+from app.routers.company import router as company_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ templates = Jinja2Templates(directory=templates_dir)
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
 app.include_router(skills_router, tags=["skills"])
+app.include_router(company_router, prefix="/api/v1", tags=["company"])
 
 
 class PersonOut(BaseModel):
