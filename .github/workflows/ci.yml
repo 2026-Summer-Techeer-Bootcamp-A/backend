@@ -18,10 +18,11 @@ jobs:
       - run: pytest -q
       - run: docker build -t career-backend:ci .
 
-      - name: Notify Discord
+      - name: Send Notifications
         if: always()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           STATUS: ${{ job.status }}
           JOB: CI
         run: python3 scripts/notify.py

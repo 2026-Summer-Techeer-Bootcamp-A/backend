@@ -44,10 +44,11 @@ jobs:
           gcloud compute ssh app-vm --zone ${REGION}-a --command \
             "cd /opt/app && sudo docker compose pull && sudo docker compose up -d && sudo docker compose ps" | tee deploy_out.txt
 
-      - name: Notify Discord
+      - name: Send Notifications
         if: always()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           STATUS: ${{ job.status }}
           JOB: Deploy
         run: |
