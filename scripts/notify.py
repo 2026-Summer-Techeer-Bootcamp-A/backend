@@ -88,6 +88,7 @@ def _build_embed() -> dict:
 
 
 def notify_discord(webhook_url: str) -> None:
+    webhook_url = webhook_url.strip().strip("'\"")
     payload = {"embeds": [_build_embed()]}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -162,6 +163,7 @@ def _build_slack_payload() -> dict:
 
 
 def notify_slack(webhook_url: str) -> None:
+    webhook_url = webhook_url.strip().strip("'\"")
     payload = _build_slack_payload()
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -189,14 +191,14 @@ def main() -> int:
         try:
             notify_discord(discord_webhook)
             print("Discord notification sent.")
-        except (urllib.error.URLError, RuntimeError, TimeoutError) as exc:
+        except Exception as exc:
             print(f"Discord notification failed: {exc}", file=sys.stderr)
 
     if slack_webhook:
         try:
             notify_slack(slack_webhook)
             print("Slack notification sent.")
-        except (urllib.error.URLError, RuntimeError, TimeoutError) as exc:
+        except Exception as exc:
             print(f"Slack notification failed: {exc}", file=sys.stderr)
 
     return 0
