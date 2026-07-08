@@ -8,7 +8,7 @@ from app.models.posting import Posting, PostingCategory, PostingTech
 from app.models.resume import Resume, ResumeSkill
 from app.models.skill import Skill
 from app.models.user import User
-from app.schemas.match import MatchGapResponse, Pool
+from app.schemas.match import MatchCoverageResponse, MatchGapResponse, Pool
 
 
 def get_skill_ids_from_resume(
@@ -165,4 +165,56 @@ def calculate_gap_response(
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
+    )
+
+def calculate_coverage_response(
+    session: Session,
+    *,
+    pool: Pool,
+    position: str | None,
+    owned_skill_ids: set[int],
+    top_k: int = 20,
+) -> MatchCoverageResponse:
+    market_skills, sample_size = get_market_skill_frequencies(
+        session=session,
+        pool=pool,
+        position=position,
+    )
+
+    top_skills = market_skills[:top_k]
+    total_freq = sum(skill["freq"] for skill in top_skills)
+    owned_freq = sum(
+        skill["freq"]
+        for skill in top_skills
+        if skill["skill_id"] in owned_skill_ids
+    )
+
+    coverage_score = 0.0
+    if total_freq > 0:
+        coverage_score = round((owned_freq / total_freq) * 100, 1)
+
+    owned_count = sum(
+        1 for skill in top_skills if skill["skill_id"] in owned_skill_ids
+    )
+
+    return MatchCoverageResponse(
+        pool=pool,
+        filter={
+            "position": position,
+            "career_min": None,
+            "career_max": None,
+        },
+        coverage_score=coverage_score,
+        top_skills=[
+            {
+                "canonical": skill["canonical"],
+                "freq": round(skill["freq"], 4),
+                "owned": skill["skill_id"] in owned_skill_ids,
+            }
+            for skill in top_skills
+        ],
+        owned_count=owned_count,
+        as_of=date.today().isoformat(),
+        sample_size=sample_size,
+        sample_warning=sample_size < 50,
     )
