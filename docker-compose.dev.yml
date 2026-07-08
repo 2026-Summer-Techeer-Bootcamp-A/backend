@@ -5,6 +5,8 @@ services:
   # Override the base app: wait for db/redis, mount source for live reload + seed access.
   app:
     build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
     volumes:
       - .:/app
     command:
