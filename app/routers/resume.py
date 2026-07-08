@@ -1,8 +1,14 @@
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, SessionDep
-from app.crud.resume import create_resume, get_resume_detail, get_resume_list, update_resume
+from app.crud.resume import (
+    create_resume,
+    delete_resume,
+    get_resume_detail,
+    get_resume_list,
+    update_resume,
+)
 from app.core.redis import create_resume_confirm_session
 from app.schemas.resume import (
     ResumeConfirmRequest,
@@ -89,6 +95,24 @@ def update_user_resume(
             detail="resume not found",
         )
     return ResumeUpdateResponse(resume_id=resume.resume_id)
+
+
+@router.delete(
+    "/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_user_resume(
+    id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Response:
+    deleted = delete_resume(session, resume_id=id, user_id=current_user.id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

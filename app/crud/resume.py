@@ -1,7 +1,7 @@
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Resume, ResumeSkill, Skill
+from app.models import Resume, ResumeCert, ResumeSkill, Skill
 from app.schemas.resume import (
     ParsedSkill,
     ResumeCreateRequest,
@@ -71,6 +71,44 @@ def update_resume(
     session.commit()
     session.refresh(resume)
     return resume
+
+
+def delete_resume(
+    session: Session,
+    *,
+    resume_id: int,
+    user_id: int,
+) -> bool:
+    result = session.execute(
+        update(Resume)
+        .where(
+            Resume.resume_id == resume_id,
+            Resume.user_id == user_id,
+            Resume.is_deleted.is_(False),
+        )
+        .values(is_deleted=True, deleted_at=func.now())
+    )
+    if result.rowcount == 0:
+        return False
+
+    session.execute(
+        update(ResumeSkill)
+        .where(
+            ResumeSkill.resume_id == resume_id,
+            ResumeSkill.is_deleted.is_(False),
+        )
+        .values(is_deleted=True, deleted_at=func.now())
+    )
+    session.execute(
+        update(ResumeCert)
+        .where(
+            ResumeCert.resume_id == resume_id,
+            ResumeCert.is_deleted.is_(False),
+        )
+        .values(is_deleted=True, deleted_at=func.now())
+    )
+    session.commit()
+    return True
 
 
 def get_resume_list(
