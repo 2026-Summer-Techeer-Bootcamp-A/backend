@@ -60,6 +60,16 @@ class ResumeCreateResponse(BaseModel):
     resume_id: int
 
 
+class ResumeListItem(BaseModel):
+    resume_id: int
+    title: str
+    position: str | None
+
+
+class ResumeListResponse(BaseModel):
+    items: list[ResumeListItem]
+
+
 class ResumeDetailResponse(BaseModel):
     resume_id: int
     title: str

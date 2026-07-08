@@ -346,6 +346,84 @@ def test_get_resume_returns_detail_for_owner(monkeypatch) -> None:
         app.dependency_overrides.clear()
 
 
+def test_get_resume_list_returns_owned_active_resume_summaries(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        owner = User(email="list-owner@example.com", password_hash="unused")
+        other = User(email="list-other@example.com", password_hash="unused")
+        seed.add_all([owner, other])
+        seed.flush()
+        seed.add_all(
+            [
+                Resume(
+                    user_id=owner.id,
+                    title="Backend resume v1",
+                    position="backend",
+                    career_min=1,
+                    career_max=3,
+                    pool="global",
+                ),
+                Resume(
+                    user_id=owner.id,
+                    title="Data resume",
+                    position="data",
+                    career_min=2,
+                    career_max=4,
+                    pool="domestic",
+                ),
+                Resume(
+                    user_id=other.id,
+                    title="Other user's resume",
+                    position="frontend",
+                    career_min=1,
+                    career_max=2,
+                    pool="global",
+                ),
+                Resume(
+                    user_id=owner.id,
+                    title="Deleted resume",
+                    position="devops",
+                    career_min=5,
+                    career_max=7,
+                    pool="global",
+                    is_deleted=True,
+                ),
+            ]
+        )
+        seed.commit()
+        owner_id = owner.id
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/v1/resume",
+            headers={"Authorization": f"Bearer {create_access_token(owner_id)}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "items": [
+                {"resume_id": 2, "title": "Data resume", "position": "data"},
+                {"resume_id": 1, "title": "Backend resume v1", "position": "backend"},
+            ]
+        }
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_get_resume_returns_404_for_missing_or_other_user(monkeypatch) -> None:
     engine = create_engine(
         "sqlite://",
