@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, status
 
 from app.core.deps import SessionDep, CurrentUser, TokenDep
 from app.schemas.auth import UserSignup, UserLogin, UserResponse, Token
