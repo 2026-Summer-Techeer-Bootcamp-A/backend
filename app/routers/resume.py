@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, SessionDep
-from app.crud.resume import create_resume, get_resume_detail, get_resume_list
+from app.crud.resume import create_resume, get_resume_detail, get_resume_list, update_resume
 from app.core.redis import create_resume_confirm_session
 from app.schemas.resume import (
     ResumeConfirmRequest,
@@ -12,6 +12,8 @@ from app.schemas.resume import (
     ResumeDetailResponse,
     ResumeListResponse,
     ResumeParseResponse,
+    ResumeUpdateRequest,
+    ResumeUpdateResponse,
 )
 from app.services.resume import parse_resume_pdf
 
@@ -62,6 +64,31 @@ def get_user_resume(
             detail="resume not found",
         )
     return resume
+
+
+@router.put(
+    "/{id}",
+    response_model=ResumeUpdateResponse,
+    status_code=status.HTTP_200_OK,
+)
+def update_user_resume(
+    id: int,
+    payload: ResumeUpdateRequest,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeUpdateResponse:
+    resume = update_resume(
+        session,
+        resume_id=id,
+        user_id=current_user.id,
+        resume_in=payload,
+    )
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return ResumeUpdateResponse(resume_id=resume.resume_id)
 
 
 @router.post(
