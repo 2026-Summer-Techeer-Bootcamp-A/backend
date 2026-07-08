@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pip install --user -q -r requirements.txt)",
+      "Bash(python -m pytest tests/test_stats_api.py -q)",
+      "Bash(python -m pytest -q)"
+    ]
+  }
+}
