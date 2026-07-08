@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, SessionDep
-from app.crud.resume import create_resume, get_resume_detail
+from app.crud.resume import create_resume, get_resume_detail, get_resume_list
 from app.core.redis import create_resume_confirm_session
 from app.schemas.resume import (
     ResumeConfirmRequest,
@@ -10,6 +10,7 @@ from app.schemas.resume import (
     ResumeCreateRequest,
     ResumeCreateResponse,
     ResumeDetailResponse,
+    ResumeListResponse,
     ResumeParseResponse,
 )
 from app.services.resume import parse_resume_pdf
@@ -29,6 +30,19 @@ def create_user_resume(
 ) -> ResumeCreateResponse:
     resume = create_resume(session, user_id=current_user.id, resume_in=payload)
     return ResumeCreateResponse(resume_id=resume.resume_id)
+
+
+@router.get(
+    "",
+    response_model=ResumeListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_user_resumes(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeListResponse:
+    items = get_resume_list(session, user_id=current_user.id)
+    return ResumeListResponse(items=items)
 
 
 @router.get(

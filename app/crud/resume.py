@@ -2,7 +2,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Resume, ResumeSkill, Skill
-from app.schemas.resume import ParsedSkill, ResumeCreateRequest, ResumeDetailResponse
+from app.schemas.resume import (
+    ParsedSkill,
+    ResumeCreateRequest,
+    ResumeDetailResponse,
+    ResumeListItem,
+)
 
 
 def create_resume(
@@ -41,6 +46,29 @@ def create_resume(
     session.commit()
     session.refresh(resume)
     return resume
+
+
+def get_resume_list(
+    session: Session,
+    *,
+    user_id: int,
+) -> list[ResumeListItem]:
+    stmt = (
+        select(Resume.resume_id, Resume.title, Resume.position)
+        .where(
+            Resume.user_id == user_id,
+            Resume.is_deleted.is_(False),
+        )
+        .order_by(Resume.updated_at.desc(), Resume.resume_id.desc())
+    )
+    return [
+        ResumeListItem(
+            resume_id=resume_id,
+            title=title,
+            position=position,
+        )
+        for resume_id, title, position in session.execute(stmt).all()
+    ]
 
 
 def get_resume_detail(
