@@ -8,9 +8,9 @@ from app.models.posting import Posting, PostingCategory, PostingTech
 from app.models.resume import Resume, ResumeSkill
 from app.models.skill import Skill
 from app.models.user import User
-from app.schemas.match import MatchCoverageResponse, MatchGapResponse, Pool
+from app.schemas.match import MatchCoverageResponse, MatchGapResponse, MatchWhatIfResponse,Pool
 
-
+#저장된 이력서에서 기술 가져옴
 def get_skill_ids_from_resume(
     session: Session,
     resume_id: int,
@@ -217,4 +217,96 @@ def calculate_coverage_response(
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=sample_size < 50,
+    )
+
+def get_pool_as_of(
+    session: Session,
+    *,
+    pool: Pool,
+    position: str | None = None,
+) -> str:
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+
+    as_of = session.scalar(
+        select(func.max(Posting.post_date))
+        .join(posting_pool_query, posting_pool_query.c.id == Posting.id)
+    )
+
+    return as_of.isoformat() if as_of is not None else date.today().isoformat()
+
+
+def get_skill_id_by_canonical(session: Session, canonical: str) -> tuple[int, str]:
+    skill = session.execute(
+        select(Skill.id, Skill.canonical).where(
+            func.lower(Skill.canonical) == canonical.lower(),
+            Skill.is_deleted.is_(False),
+        )
+    ).one_or_none()
+
+    if skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="add is not in taxonomy",
+        )
+
+    return skill.id, skill.canonical
+
+
+def count_matched_postings(
+    session: Session,
+    *,
+    pool: Pool,
+    position: str | None,
+    skill_ids: set[int],
+) -> int:
+    if not skill_ids:
+        return 0
+
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+
+    return session.scalar(
+        select(func.count(distinct(PostingTech.posting_id)))
+        .join(posting_pool_query, posting_pool_query.c.id == PostingTech.posting_id)
+        .where(
+            PostingTech.skill_id.in_(skill_ids),
+            PostingTech.is_deleted.is_(False),
+        )
+    ) or 0
+
+
+def calculate_what_if_response(
+    session: Session,
+    *,
+    pool: Pool,
+    add: str,
+    owned_skill_ids: set[int],
+    position: str | None = None,
+) -> MatchWhatIfResponse:
+    add_skill_id, add_canonical = get_skill_id_by_canonical(session=session, canonical=add)
+
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+    sample_size = session.scalar(select(func.count()).select_from(posting_pool_query)) or 0
+
+    matched_before = count_matched_postings(
+        session=session,
+        pool=pool,
+        position=position,
+        skill_ids=owned_skill_ids,
+    )
+
+    matched_after = count_matched_postings(
+        session=session,
+        pool=pool,
+        position=position,
+        skill_ids=owned_skill_ids | {add_skill_id},
+    )
+
+    return MatchWhatIfResponse(
+        add=add_canonical,
+        matched_before=matched_before,
+        matched_after=matched_after,
+        delta=matched_after - matched_before,
+        as_of=get_pool_as_of(session=session, pool=pool, position=position),
+        sample_size=sample_size,
+        sample_warning=True if sample_size < 50 else None,
     )
