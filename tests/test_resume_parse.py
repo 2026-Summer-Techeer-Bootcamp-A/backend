@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base, get_session
+from app.core.security import create_access_token
 from app.main import app
+from app.models.user import User
+from app.models.resume import Resume, ResumeSkill
 from app.models.skill import Skill, SkillAlias
 
 
@@ -196,3 +199,262 @@ def test_extract_pdf_text_falls_back_to_pdftotext(monkeypatch) -> None:
     monkeypatch.setattr(resume_service, "extract_pdf_text_with_pdftotext", lambda _: "Python")
 
     assert resume_service.extract_pdf_text(b"%PDF-1.4 fake") == "Python"
+
+
+def test_create_resume_stores_meta_and_skills_for_authenticated_user(
+    monkeypatch,
+) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(
+            email="resume@example.com",
+            password_hash="unused",
+            nickname="resume-user",
+        )
+        python = Skill(canonical="Python", category="language")
+        seed.add_all([user, python])
+        seed.commit()
+        user_id = user.id
+        python_id = python.id
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        token = create_access_token(user_id)
+        response = client.post(
+            "/api/v1/resume",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "title": "Backend resume v2",
+                "skills": [
+                    {"canonical": "Python", "category": "language", "in_dict": True},
+                    {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
+                ],
+                "position": "backend",
+                "career_min": 3,
+                "career_max": 5,
+                "pool": "global",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json() == {"resume_id": 1}
+
+        with testing_session() as session:
+            resume = session.get(Resume, 1)
+            assert resume is not None
+            assert resume.user_id == user_id
+            assert resume.title == "Backend resume v2"
+            assert resume.position == "backend"
+            assert resume.career_min == 3
+            assert resume.career_max == 5
+            assert resume.pool == "global"
+
+            stored_skills = session.query(ResumeSkill).order_by(ResumeSkill.id).all()
+            assert len(stored_skills) == 2
+            assert stored_skills[0].skill_id == python_id
+            assert stored_skills[0].raw_label is None
+            assert stored_skills[0].is_out_of_dict is False
+            assert stored_skills[1].skill_id is None
+            assert stored_skills[1].raw_label == "MysteryTool"
+            assert stored_skills[1].is_out_of_dict is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_get_resume_returns_detail_for_owner(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(
+            email="detail@example.com",
+            password_hash="unused",
+            nickname="detail-user",
+        )
+        python = Skill(canonical="Python", category="language")
+        seed.add_all([user, python])
+        seed.flush()
+        resume = Resume(
+            user_id=user.id,
+            title="Backend resume v2",
+            position="backend",
+            career_min=3,
+            career_max=5,
+            pool="global",
+        )
+        seed.add(resume)
+        seed.flush()
+        seed.add_all(
+            [
+                ResumeSkill(resume_id=resume.resume_id, skill_id=python.id),
+                ResumeSkill(
+                    resume_id=resume.resume_id,
+                    raw_label="MysteryTool",
+                    is_out_of_dict=True,
+                ),
+            ]
+        )
+        seed.commit()
+        user_id = user.id
+        resume_id = resume.resume_id
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get(
+            f"/api/v1/resume/{resume_id}",
+            headers={"Authorization": f"Bearer {create_access_token(user_id)}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "resume_id": resume_id,
+            "title": "Backend resume v2",
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+                {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
+            ],
+            "position": "backend",
+            "career_min": 3,
+            "career_max": 5,
+            "pool": "global",
+        }
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_get_resume_returns_404_for_missing_or_other_user(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        owner = User(email="owner@example.com", password_hash="unused")
+        requester = User(email="requester@example.com", password_hash="unused")
+        seed.add_all([owner, requester])
+        seed.flush()
+        resume = Resume(
+            user_id=owner.id,
+            title="Private resume",
+            position="backend",
+            career_min=1,
+            career_max=2,
+            pool="domestic",
+        )
+        seed.add(resume)
+        seed.commit()
+        requester_id = requester.id
+        private_resume_id = resume.resume_id
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {create_access_token(requester_id)}"}
+
+        other_user_response = client.get(
+            f"/api/v1/resume/{private_resume_id}",
+            headers=headers,
+        )
+        missing_response = client.get("/api/v1/resume/9999", headers=headers)
+
+        assert other_user_response.status_code == 404
+        assert other_user_response.json()["detail"] == "resume not found"
+        assert missing_response.status_code == 404
+        assert missing_response.json()["detail"] == "resume not found"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_create_resume_requires_authentication() -> None:
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/resume",
+        json={
+            "title": "Backend resume v2",
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            "position": "backend",
+            "career_min": 3,
+            "career_max": 5,
+            "pool": "global",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+
+def test_create_resume_rejects_invalid_pool(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(email="invalid@example.com", password_hash="unused")
+        seed.add(user)
+        seed.commit()
+        user_id = user.id
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/resume",
+            headers={"Authorization": f"Bearer {create_access_token(user_id)}"},
+            json={
+                "title": "Backend resume v2",
+                "skills": [
+                    {"canonical": "Python", "category": "language", "in_dict": True},
+                ],
+                "position": "backend",
+                "career_min": 3,
+                "career_max": 5,
+                "pool": "mixed",
+            },
+        )
+
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
