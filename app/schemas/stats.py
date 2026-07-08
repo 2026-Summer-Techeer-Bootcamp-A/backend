@@ -14,3 +14,15 @@ class SkillShareResponse(BaseModel):
     skills: list[SkillShareItem]
     as_of: str
     sample_size: int
+
+
+class CooccurrenceItem(BaseModel):
+    canonical: str
+    co_rate: float = Field(ge=0, le=1)
+    co_count: int
+
+
+class CooccurrenceResponse(BaseModel):
+    skill: str
+    co_occurs: list[CooccurrenceItem]
+    as_of: str
