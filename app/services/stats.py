@@ -1,0 +1,68 @@
+from datetime import date
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models.posting import Posting, PostingCategory, PostingTech
+from app.models.skill import Skill
+from app.schemas.match import Pool
+from app.schemas.stats import SkillShareItem, SkillShareResponse
+
+
+def get_skill_share_response(
+    session: Session,
+    *,
+    pool: Pool,
+    position: str | None,
+    limit: int,
+) -> SkillShareResponse:
+    posting_query = select(Posting.id).where(
+        Posting.pool == pool,
+        Posting.is_deleted.is_(False),
+    )
+
+    if position:
+        posting_query = posting_query.join(
+            PostingCategory, PostingCategory.posting_id == Posting.id
+        ).where(
+            PostingCategory.category == position,
+            PostingCategory.is_deleted.is_(False),
+        )
+
+    posting_pool = posting_query.subquery()
+
+    sample_size = session.scalar(select(func.count()).select_from(posting_pool)) or 0
+
+    skills: list[SkillShareItem] = []
+    if sample_size > 0:
+        rows = session.execute(
+            select(
+                Skill.canonical,
+                func.count(func.distinct(PostingTech.posting_id)).label("posting_count"),
+            )
+            .join(PostingTech, PostingTech.skill_id == Skill.id)
+            .join(posting_pool, posting_pool.c.id == PostingTech.posting_id)
+            .where(
+                Skill.is_deleted.is_(False),
+                PostingTech.is_deleted.is_(False),
+            )
+            .group_by(Skill.id, Skill.canonical)
+            .order_by(func.count(func.distinct(PostingTech.posting_id)).desc(), Skill.canonical.asc())
+            .limit(limit)
+        ).all()
+
+        skills = [
+            SkillShareItem(
+                canonical=row.canonical,
+                share=round(row.posting_count / sample_size, 4),
+                posting_count=row.posting_count,
+            )
+            for row in rows
+        ]
+
+    return SkillShareResponse(
+        pool=pool,
+        skills=skills,
+        as_of=date.today().isoformat(),
+        sample_size=sample_size,
+    )

@@ -16,6 +16,7 @@ from app.routers.cert import router as cert_router
 from app.routers.resume import router as resume_router
 from app.routers.skills import router as skills_router
 from app.routers.match import router as match_router
+from app.routers.stats import router as stats_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -47,6 +48,7 @@ app.include_router(cert_router, prefix="/api/v1", tags=["cert"])
 app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
 app.include_router(skills_router, tags=["skills"])
 app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
+app.include_router(stats_router, prefix="/api/v1", tags=["stats"])
 
 
 class PersonOut(BaseModel):
