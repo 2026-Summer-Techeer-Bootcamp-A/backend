@@ -1,16 +1,118 @@
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Response, UploadFile, status
 
 from app.core.config import settings
-from app.core.deps import SessionDep
+from app.core.deps import CurrentUser, SessionDep
+from app.crud.resume import (
+    create_resume,
+    delete_resume,
+    get_resume_detail,
+    get_resume_list,
+    update_resume,
+)
 from app.core.redis import create_resume_confirm_session
 from app.schemas.resume import (
     ResumeConfirmRequest,
     ResumeConfirmResponse,
+    ResumeCreateRequest,
+    ResumeCreateResponse,
+    ResumeDetailResponse,
+    ResumeListResponse,
     ResumeParseResponse,
+    ResumeUpdateRequest,
+    ResumeUpdateResponse,
 )
 from app.services.resume import parse_resume_pdf
 
 router = APIRouter()
+
+
+@router.post(
+    "",
+    response_model=ResumeCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_user_resume(
+    payload: ResumeCreateRequest,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeCreateResponse:
+    resume = create_resume(session, user_id=current_user.id, resume_in=payload)
+    return ResumeCreateResponse(resume_id=resume.resume_id)
+
+
+@router.get(
+    "",
+    response_model=ResumeListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_user_resumes(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeListResponse:
+    items = get_resume_list(session, user_id=current_user.id)
+    return ResumeListResponse(items=items)
+
+
+@router.get(
+    "/{id}",
+    response_model=ResumeDetailResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_user_resume(
+    id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeDetailResponse:
+    resume = get_resume_detail(session, resume_id=id, user_id=current_user.id)
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return resume
+
+
+@router.put(
+    "/{id}",
+    response_model=ResumeUpdateResponse,
+    status_code=status.HTTP_200_OK,
+)
+def update_user_resume(
+    id: int,
+    payload: ResumeUpdateRequest,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeUpdateResponse:
+    resume = update_resume(
+        session,
+        resume_id=id,
+        user_id=current_user.id,
+        resume_in=payload,
+    )
+    if resume is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return ResumeUpdateResponse(resume_id=resume.resume_id)
+
+
+@router.delete(
+    "/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_user_resume(
+    id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Response:
+    deleted = delete_resume(session, resume_id=id, user_id=current_user.id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
