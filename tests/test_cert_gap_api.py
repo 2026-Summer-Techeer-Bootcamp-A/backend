@@ -86,7 +86,7 @@ def test_get_cert_gap_returns_404_for_unknown_resume(client: TestClient) -> None
     response = client.get("/api/v1/cert/gap?resume_id=999&pool=domestic&position=Developer")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Resume not found"}
+    assert response.json() == {"detail": "resume not found"}
 
 
 def test_get_cert_gap_rejects_invalid_pool(client: TestClient) -> None:
@@ -106,3 +106,65 @@ def test_get_cert_gap_returns_empty_gap_when_no_matching_postings(client: TestCl
         "as_of": "2026-07-08",
         "sample_size": 0,
     }
+
+
+def test_get_cert_gap_requires_resume_id_or_session_id(client: TestClient) -> None:
+    response = client.get("/api/v1/cert/gap?pool=domestic&position=Developer")
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "resume_id or session_id is required"}
+
+
+def test_get_cert_gap_uses_empty_owned_for_existing_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    from app.core import redis as redis_module
+
+    class FakeRedis:
+        def exists(self, key: str) -> int:
+            return 1 if key == "resume_confirm:guest-1" else 0
+
+    monkeypatch.setattr(redis_module, "redis_client", FakeRedis())
+
+    response = client.get("/api/v1/cert/gap?session_id=guest-1&pool=domestic&position=Developer")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "required": [
+            {"name": "AWS Certified Developer", "share": 0.5, "posting_count": 1},
+            {"name": "PMP", "share": 0.5, "posting_count": 1},
+        ],
+        "owned": [],
+        "gap": [
+            {"name": "AWS Certified Developer", "share": 0.5},
+            {"name": "PMP", "share": 0.5},
+        ],
+        "as_of": "2026-07-08",
+        "sample_size": 2,
+    }
+
+
+def test_get_cert_gap_returns_404_for_unknown_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    from app.core import redis as redis_module
+
+    class FakeRedis:
+        def exists(self, key: str) -> int:
+            return 0
+
+    monkeypatch.setattr(redis_module, "redis_client", FakeRedis())
+
+    response = client.get("/api/v1/cert/gap?session_id=missing&pool=domestic&position=Developer")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "session not found"}
+
+
+def test_get_cert_gap_allows_missing_position(client: TestClient) -> None:
+    response = client.get("/api/v1/cert/gap?resume_id=1&pool=domestic")
+
+    assert response.status_code == 200
+    assert response.json()["sample_size"] == 2

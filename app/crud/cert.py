@@ -37,35 +37,40 @@ def get_owned_cert_names(session: Session, resume_id: int) -> list[str]:
     return list(session.execute(stmt).scalars().all())
 
 
-def count_matching_postings(session: Session, pool: str, position: str) -> int:
-    stmt = (
-        select(func.count(func.distinct(Posting.id)))
-        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
-        .where(
-            Posting.pool == pool,
-            Posting.is_deleted.is_(False),
+def count_matching_postings(session: Session, pool: str, position: str | None) -> int:
+    stmt = select(func.count(func.distinct(Posting.id))).where(
+        Posting.pool == pool,
+        Posting.is_deleted.is_(False),
+    )
+
+    if position:
+        stmt = stmt.join(PostingCategory, PostingCategory.posting_id == Posting.id).where(
             PostingCategory.category == position,
             PostingCategory.is_deleted.is_(False),
         )
-    )
+
     return session.execute(stmt).scalar_one()
 
 
-def get_required_cert_stats(session: Session, pool: str, position: str) -> list[tuple[str, int]]:
+def get_required_cert_stats(session: Session, pool: str, position: str | None) -> list[tuple[str, int]]:
     stmt = (
         select(Cert.name, func.count(func.distinct(Posting.id)).label("posting_count"))
         .join(PostingCert, PostingCert.cert_id == Cert.id)
         .join(Posting, Posting.id == PostingCert.posting_id)
-        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
         .where(
             Posting.pool == pool,
             Posting.is_deleted.is_(False),
-            PostingCategory.category == position,
-            PostingCategory.is_deleted.is_(False),
             PostingCert.is_deleted.is_(False),
             Cert.is_deleted.is_(False),
         )
         .group_by(Cert.name)
-        .order_by(Cert.name)
+        .order_by(func.count(func.distinct(Posting.id)).desc(), Cert.name)
     )
+
+    if position:
+        stmt = stmt.join(PostingCategory, PostingCategory.posting_id == Posting.id).where(
+            PostingCategory.category == position,
+            PostingCategory.is_deleted.is_(False),
+        )
+
     return [(name, posting_count) for name, posting_count in session.execute(stmt).all()]
