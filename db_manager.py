@@ -7,12 +7,10 @@ import sys
 import json
 import contextlib
 from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session
 import questionary
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.table import Table
-from rich import print as rprint
 
 from app.core.db import engine, Base
 
@@ -72,7 +70,7 @@ def view_tables_list():
         for t_name in tables:
             try:
                 cnt = str(conn.execute(text(f'SELECT COUNT(*) FROM "{t_name}"')).scalar())
-            except Exception as e:
+            except Exception:
                 cnt = "Error"
             table_data.append((t_name, cnt))
 
@@ -239,6 +237,7 @@ if __name__ == "__main__":
     try:
         import rich
         import questionary
+        _ = (rich, questionary)
     except ImportError:
         print("라이브러리가 설치되지 않았습니다. 실행 전 아래 명령어를 입력해주세요:")
         print("pip install rich questionary")
