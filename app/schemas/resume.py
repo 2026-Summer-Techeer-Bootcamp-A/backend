@@ -39,3 +39,32 @@ class ResumeConfirmRequest(BaseModel):
 class ResumeConfirmResponse(BaseModel):
     session_id: str
     ttl: int
+
+
+class ResumeCreateRequest(BaseModel):
+    title: str = Field(min_length=1)
+    skills: list[ParsedSkill] = Field(min_length=1)
+    position: str = Field(min_length=1)
+    career_min: int = Field(ge=0)
+    career_max: int = Field(ge=0)
+    pool: Literal["global", "domestic"]
+
+    @model_validator(mode="after")
+    def validate_career_range(self) -> "ResumeCreateRequest":
+        if self.career_min > self.career_max:
+            raise ValueError("career_min must be less than or equal to career_max")
+        return self
+
+
+class ResumeCreateResponse(BaseModel):
+    resume_id: int
+
+
+class ResumeDetailResponse(BaseModel):
+    resume_id: int
+    title: str
+    skills: list[ParsedSkill]
+    position: str
+    career_min: int
+    career_max: int
+    pool: Literal["global", "domestic"]

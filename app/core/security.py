@@ -3,7 +3,7 @@ import bcrypt
 import jwt
 
 # 개발용 임시 시크릿 키. 실제 운영 환경에서는 환경 변수(settings)에서 가져와야 함.
-SECRET_KEY = "dummy-secret-key-for-dev"
+SECRET_KEY = "dummy-secret-key-for-dev-at-least-32-bytes"
 ALGORITHM = "HS256"
 # 토큰 탈취 위험을 최소화하기 위해 만료 시간을 7일로 제한.
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
