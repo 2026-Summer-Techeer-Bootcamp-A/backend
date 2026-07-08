@@ -2,7 +2,12 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 
 from app.core.config import settings
 from app.core.deps import SessionDep
-from app.schemas.resume import ResumeParseResponse
+from app.core.redis import create_resume_confirm_session
+from app.schemas.resume import (
+    ResumeConfirmRequest,
+    ResumeConfirmResponse,
+    ResumeParseResponse,
+)
 from app.services.resume import parse_resume_pdf
 
 router = APIRouter()
@@ -41,6 +46,17 @@ async def parse_resume(file: UploadFile, session: SessionDep) -> ResumeParseResp
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="could not parse pdf",
         ) from exc
+
+
+@router.post(
+    "/confirm",
+    response_model=ResumeConfirmResponse,
+    status_code=status.HTTP_200_OK,
+)
+def confirm_resume(payload: ResumeConfirmRequest) -> ResumeConfirmResponse:
+    ttl = settings.resume_confirm_session_ttl_seconds
+    session_id = create_resume_confirm_session(payload.model_dump(), ttl)
+    return ResumeConfirmResponse(session_id=session_id, ttl=ttl)
 
 
 def _is_pdf_upload(file: UploadFile) -> bool:
