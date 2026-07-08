@@ -84,6 +84,111 @@ def test_parse_resume_returns_skills_position_and_career(
     }
 
 
+def test_confirm_resume_stores_confirmed_input_in_session(
+    monkeypatch, client_with_skill_dictionary: TestClient
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_create_resume_confirm_session(payload: dict[str, object], ttl: int) -> str:
+        captured["payload"] = payload
+        captured["ttl"] = ttl
+        return "b1f9c0e2"
+
+    monkeypatch.setattr(
+        "app.routers.resume.create_resume_confirm_session",
+        fake_create_resume_confirm_session,
+    )
+
+    response = client_with_skill_dictionary.post(
+        "/api/v1/resume/confirm",
+        json={
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+                {"canonical": "AWS", "category": "devops", "in_dict": True},
+            ],
+            "position": "backend",
+            "career_min": 3,
+            "career_max": 5,
+            "pool": "global",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "b1f9c0e2", "ttl": 3600}
+    assert captured == {
+        "payload": {
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+                {"canonical": "AWS", "category": "devops", "in_dict": True},
+            ],
+            "position": "backend",
+            "career_min": 3,
+            "career_max": 5,
+            "pool": "global",
+        },
+        "ttl": 3600,
+    }
+
+
+def test_confirm_resume_rejects_invalid_pool(
+    monkeypatch, client_with_skill_dictionary: TestClient
+) -> None:
+    monkeypatch.setattr(
+        "app.routers.resume.create_resume_confirm_session",
+        lambda payload, ttl: "unused",
+    )
+
+    response = client_with_skill_dictionary.post(
+        "/api/v1/resume/confirm",
+        json={
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            "pool": "mixed",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_resume_confirm_session_uses_prefixed_redis_key(monkeypatch) -> None:
+    from app.core import redis as redis_module
+
+    captured: dict[str, object] = {}
+
+    class FakeRedis:
+        def exists(self, key: str) -> int:
+            captured["exists_key"] = key
+            return 0
+
+        def setex(self, key: str, ttl: int, value: str) -> None:
+            captured["setex_key"] = key
+            captured["ttl"] = ttl
+            captured["value"] = value
+
+    monkeypatch.setattr(redis_module, "redis_client", FakeRedis())
+    monkeypatch.setattr(
+        redis_module.secrets,
+        "token_hex",
+        lambda bytes_count: "a" * (bytes_count * 2),
+    )
+
+    session_id = redis_module.create_resume_confirm_session(
+        {"pool": "global"},
+        ttl_seconds=3600,
+    )
+
+    expected_session_id = "a" * 32
+    expected_key = f"resume_confirm:{expected_session_id}"
+    assert session_id == expected_session_id
+    assert captured == {
+        "exists_key": expected_key,
+        "setex_key": expected_key,
+        "ttl": 3600,
+        "value": '{"pool": "global"}',
+    }
+
+
 def test_extract_pdf_text_falls_back_to_pdftotext(monkeypatch) -> None:
     from app.services import resume as resume_service
 
