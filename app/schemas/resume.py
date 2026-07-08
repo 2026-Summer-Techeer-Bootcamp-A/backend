@@ -60,6 +60,14 @@ class ResumeCreateResponse(BaseModel):
     resume_id: int
 
 
+class ResumeUpdateRequest(ResumeCreateRequest):
+    pass
+
+
+class ResumeUpdateResponse(BaseModel):
+    resume_id: int
+
+
 class ResumeListItem(BaseModel):
     resume_id: int
     title: str
