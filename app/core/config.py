@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
 
     resume_parse_max_bytes: int = 10 * 1024 * 1024
+    resume_confirm_session_ttl_seconds: int = 3600
 
     # TODO: consumed by the future OTel trace exporter configuration.
     otel_exporter_otlp_endpoint: str = "http://tempo:4317"
