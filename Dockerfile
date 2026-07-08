@@ -9,6 +9,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
+COPY static/ static/
+COPY templates/ templates/
 
 RUN useradd --create-home --shell /usr/sbin/nologin appuser
 USER appuser
