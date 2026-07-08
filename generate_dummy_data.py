@@ -248,6 +248,7 @@ def main():
     try:
         import bcrypt
         import faker
+        _ = (bcrypt, faker)
     except ImportError:
         print("Required packages missing. Run: pip install faker bcrypt passlib")
         return

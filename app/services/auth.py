@@ -4,7 +4,6 @@ from app.crud import user as crud_user
 from app.schemas.auth import UserSignup, UserLogin, UserResponse, Token
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.core.redis import add_token_to_blocklist
-from app.core.config import settings
 
 def signup(session: Session, user_in: UserSignup) -> UserResponse:
     # 이메일 중복 시 409 Conflict 에러를 반환하여 클라이언트가 알맞게 대처할 수 있도록 처리.

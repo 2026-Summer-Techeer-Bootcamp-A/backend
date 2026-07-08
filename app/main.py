@@ -1,21 +1,21 @@
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request, HTTPException
 from sqlalchemy import inspect, text
-from app.core.db import engine
 
+import app.models  # noqa: F401
 from app.core.config import settings
-from app.core.db import get_session, engine
+from app.core.db import engine
 from app.core.db import Base
-from app.models import Person, __init__ as models_init
 from app.routers.auth import router as auth_router
 from app.routers.cert import router as cert_router
+from app.routers.resume import router as resume_router
+from app.routers.skills import router as skills_router
+from app.routers.match import router as match_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
+
 
 Instrumentator().instrument(app).expose(app)
 
@@ -43,6 +44,9 @@ templates = Jinja2Templates(directory=templates_dir)
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(cert_router, prefix="/api/v1", tags=["cert"])
+app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
+app.include_router(skills_router, tags=["skills"])
+app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
 
 
 class PersonOut(BaseModel):
@@ -56,7 +60,7 @@ class PersonOut(BaseModel):
 def read_root(request: Request):
     if not templates:
         return {"error": "Templates not loaded"}
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.get("/healthz")
@@ -67,19 +71,19 @@ def healthz() -> dict[str, str]:
 def test_ui(request: Request):
     if not templates:
         return {"error": "Templates not loaded"}
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse(request, "dashboard.html")
 
 @app.get("/easy-dash")
 def easy_dash(request: Request):
     if not templates:
         return {"error": "Templates not loaded"}
-    return templates.TemplateResponse("easy_dash.html", {"request": request})
+    return templates.TemplateResponse(request, "easy_dash.html")
 
 @app.get("/db-viewer")
 def db_viewer(request: Request):
     if not templates:
         return {"error": "Templates not loaded"}
-    return templates.TemplateResponse("db_viewer.html", {"request": request})
+    return templates.TemplateResponse(request, "db_viewer.html")
 
 @app.get("/api/db/tables")
 def get_db_tables():
