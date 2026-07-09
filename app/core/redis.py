@@ -17,7 +17,6 @@ def add_token_to_blocklist(token: str, expires_in_seconds: int):
 
 
 def is_token_blocklisted(token: str) -> bool:
-    # 들어온 토큰이 로그아웃 처리되어 블록리스트에 있는지 O(1) 시간 복잡도로 검사.
     return redis_client.exists(f"blocklist:{token}") > 0
 
 
@@ -46,11 +45,3 @@ def get_resume_confirm_session(session_id: str) -> dict[str, Any] | None:
 
 def resume_confirm_session_exists(session_id: str) -> bool:
     return redis_client.exists(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}") > 0
-
-
-# resume/confirm으로 저장한 비로그인 분석 세션 payload를 Redis에서 조회한다.
-def get_resume_confirm_session(session_id: str) -> dict[str, Any] | None:
-    raw = redis_client.get(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}")
-    if raw is None:
-        return None
-    return json.loads(raw)
