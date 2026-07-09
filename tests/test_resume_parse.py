@@ -154,6 +154,74 @@ def test_confirm_resume_rejects_invalid_pool(
     assert response.status_code == 422
 
 
+def test_resume_feedback_uses_confirmed_session_without_auth(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.routers.resume.get_resume_confirm_session",
+        lambda session_id: {
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            "position": "backend",
+            "pool": "global",
+        },
+    )
+    monkeypatch.setattr(
+        "app.routers.resume.generate_resume_feedback",
+        lambda *, skills, position: {
+            "feedback": ["Docker 경험을 프로젝트 설명에 보강해보세요."],
+            "questions": ["Python을 선택한 이유를 설명해주세요."],
+            "model": "primary",
+            "degraded": False,
+        },
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/resume/feedback",
+        json={"session_id": "b1f9c0e2", "position": "backend"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "feedback": ["Docker 경험을 프로젝트 설명에 보강해보세요."],
+        "questions": ["Python을 선택한 이유를 설명해주세요."],
+        "model": "primary",
+        "degraded": False,
+    }
+
+
+def test_resume_feedback_returns_404_for_missing_session(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.routers.resume.get_resume_confirm_session",
+        lambda session_id: None,
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/resume/feedback",
+        json={"session_id": "missing", "position": "backend"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "resume session not found"
+
+
+def test_resume_feedback_falls_back_when_gemini_is_unavailable(monkeypatch) -> None:
+    from app.services import resume_feedback
+
+    monkeypatch.setattr(resume_feedback.settings, "gemini_api_key", None)
+
+    response = resume_feedback.generate_resume_feedback(
+        skills=[
+            {"canonical": "Python", "category": "language", "in_dict": True},
+        ],
+        position="backend",
+    )
+
+    assert response.degraded is True
+    assert response.model == "fallback"
+    assert response.feedback
+    assert response.questions
+
+
 def test_create_resume_confirm_session_uses_prefixed_redis_key(monkeypatch) -> None:
     from app.core import redis as redis_module
 
@@ -190,6 +258,26 @@ def test_create_resume_confirm_session_uses_prefixed_redis_key(monkeypatch) -> N
         "ttl": 3600,
         "value": '{"pool": "global"}',
     }
+
+
+def test_get_resume_confirm_session_reads_prefixed_redis_key(monkeypatch) -> None:
+    from app.core import redis as redis_module
+
+    captured: dict[str, str] = {}
+
+    class FakeRedis:
+        def get(self, key: str) -> str:
+            captured["get_key"] = key
+            return '{"skills": [{"canonical": "Python", "category": "language", "in_dict": true}]}'
+
+    monkeypatch.setattr(redis_module, "redis_client", FakeRedis())
+
+    assert redis_module.get_resume_confirm_session("b1f9c0e2") == {
+        "skills": [
+            {"canonical": "Python", "category": "language", "in_dict": True},
+        ]
+    }
+    assert captured == {"get_key": "resume_confirm:b1f9c0e2"}
 
 
 def test_extract_pdf_text_falls_back_to_pdftotext(monkeypatch) -> None:
