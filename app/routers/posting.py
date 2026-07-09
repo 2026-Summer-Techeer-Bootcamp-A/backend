@@ -4,12 +4,24 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.core.deps import SessionDep
-from app.crud.posting import list_posting_cards
+from app.crud.posting import get_posting_detail, list_posting_cards
 from app.routers.match import get_user_from_optional_authorization
-from app.schemas.posting import Pool, PostingListResponse, PostingSort
+from app.schemas.posting import Pool, PostingDetailResponse, PostingListResponse, PostingSort
 
 
 router = APIRouter()
+
+
+@router.get(
+    "/postings/{posting_id}",
+    response_model=PostingDetailResponse,
+    response_model_exclude_none=True,
+)
+def get_posting(
+    posting_id: int,
+    session: SessionDep,
+) -> PostingDetailResponse:
+    return PostingDetailResponse(**get_posting_detail(session, posting_id=posting_id))
 
 
 @router.get(

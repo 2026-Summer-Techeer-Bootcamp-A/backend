@@ -52,8 +52,8 @@ app.include_router(job_categories_router, prefix="/api/v1", tags=["job-categorie
 app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
 app.include_router(skills_router, tags=["skills"])
 app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
-app.include_router(posting_router, prefix="/api/v1", tags=["postings"])
 app.include_router(posting_map_router, prefix="/api/v1", tags=["posting-map"])
+app.include_router(posting_router, prefix="/api/v1", tags=["postings"])
 app.include_router(company_router, prefix="/api/v1", tags=["company"])
 
 
