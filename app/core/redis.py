@@ -19,6 +19,7 @@ def add_token_to_blocklist(token: str, expires_in_seconds: int):
 def is_token_blocklisted(token: str) -> bool:
     return redis_client.exists(f"blocklist:{token}") > 0
 
+
 def create_resume_confirm_session(payload: dict[str, Any], ttl_seconds: int) -> str:
     for _ in range(5):
         session_id = secrets.token_hex(16)
@@ -44,11 +45,3 @@ def get_resume_confirm_session(session_id: str) -> dict[str, Any] | None:
 
 def resume_confirm_session_exists(session_id: str) -> bool:
     return redis_client.exists(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}") > 0
-
-
-# resume/confirm으로 저장한 비로그인 분석 세션 payload를 Redis에서 조회한다.
-def get_resume_confirm_session(session_id: str) -> dict[str, Any] | None:
-    raw = redis_client.get(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}")
-    if raw is None:
-        return None
-    return json.loads(raw)
