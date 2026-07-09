@@ -17,9 +17,7 @@ def add_token_to_blocklist(token: str, expires_in_seconds: int):
 
 
 def is_token_blocklisted(token: str) -> bool:
-    # 들어온 토큰이 로그아웃 처리되어 블록리스트에 있는지 O(1) 시간 복잡도로 검사.
     return redis_client.exists(f"blocklist:{token}") > 0
-
 
 def create_resume_confirm_session(payload: dict[str, Any], ttl_seconds: int) -> str:
     for _ in range(5):
