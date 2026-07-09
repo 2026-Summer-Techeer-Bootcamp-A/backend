@@ -95,7 +95,9 @@ def get_match_gap(
             current_user=current_user,
         )
     else:
-        owned_skill_ids = get_skill_ids_from_session(session_id=session_id)
+        owned_skill_ids = get_skill_ids_from_session(
+            session=session,
+            session_id=session_id)
 
     return calculate_gap_response(
         session=session,
@@ -137,7 +139,9 @@ def get_match_coverage(
             current_user=current_user,
         )
     else: #resume/confirm
-        owned_skill_ids = get_skill_ids_from_session(session_id=session_id)
+        owned_skill_ids = get_skill_ids_from_session(
+            session=session,
+            session_id=session_id)
 
     return calculate_coverage_response(
         session=session,
@@ -180,7 +184,9 @@ def get_match_what_if(
             current_user=current_user,
         )
     else:
-        owned_skill_ids = get_skill_ids_from_session(session_id=session_id)
+        owned_skill_ids = get_skill_ids_from_session(
+            session=session,
+            session_id=session_id)
 
     return calculate_what_if_response(
         session=session,
