@@ -9,6 +9,7 @@ from app.models.resume import Resume, ResumeSkill
 from app.models.skill import Skill
 from app.models.user import User
 from app.schemas.match import MatchCoverageResponse, MatchGapResponse, MatchWhatIfResponse,Pool
+from app.core.redis import get_resume_confirm_session
 
 #저장된 이력서에서 기술 가져옴
 def get_skill_ids_from_resume(
@@ -41,14 +42,35 @@ def get_skill_ids_from_resume(
 
 
 def get_skill_ids_from_session(
+    session: Session,
     session_id: str,
 ) -> set[int]:
-    # TODO: /resume/confirm 구현 후 연결 부분
-    
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="session not found",
-    )
+    payload = get_resume_confirm_session(session_id)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="session not found",
+        )
+
+    canonicals = {
+    skill.get("canonical")
+    for skill in payload.get("skills", [])
+    if isinstance(skill, dict)
+    and skill.get("canonical")
+    and skill.get("in_dict") is True
+}
+
+    if not canonicals:
+        return set()
+
+    rows = session.scalars(
+        select(Skill.id).where(
+            Skill.canonical.in_(canonicals),
+            Skill.is_deleted.is_(False),
+        )
+    ).all()
+
+    return set(rows)
 
 
 def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
