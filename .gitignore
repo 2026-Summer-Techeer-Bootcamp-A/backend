@@ -15,6 +15,9 @@ venv/
 # OS
 .DS_Store
 
+# Editor
+.vscode/
+
 # Misc
 out/
 *.db
