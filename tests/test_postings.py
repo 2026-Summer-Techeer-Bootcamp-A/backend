@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base, get_session
 from app.core.security import create_access_token
 from app.main import app
-from app.models import Posting, PostingCategory, PostingTech, RawPosting, Resume, ResumeSkill, Skill, User
+from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill, User
 
 
 @pytest.fixture
@@ -26,8 +26,9 @@ def client() -> Iterator[TestClient]:
         python = Skill(canonical="Python", category="language")
         spring = Skill(canonical="Spring", category="framework")
         aws = Skill(canonical="AWS", category="cloud")
+        aws_saa = Cert(name="AWS SAA")
         user = User(email="postings@example.com", password_hash="unused")
-        seed.add_all([python, spring, aws, user])
+        seed.add_all([python, spring, aws, aws_saa, user])
         seed.flush()
 
         resume = Resume(user_id=user.id, title="Backend Resume", position="backend", pool="domestic")
@@ -48,6 +49,11 @@ def client() -> Iterator[TestClient]:
             title="Backend Engineer",
             post_date=date(2026, 7, 1),
             close_date=date(2026, 7, 31),
+            career_min=3,
+            career_max=5,
+            region_city="Seoul",
+            industry="fintech",
+            response_rate=0.82,
         )
         newer = Posting(
             source="jumpit",
@@ -88,6 +94,7 @@ def client() -> Iterator[TestClient]:
                 PostingTech(posting_id=older.id, skill_id=spring.id),
                 PostingTech(posting_id=newer.id, skill_id=spring.id),
                 PostingTech(posting_id=frontend.id, skill_id=aws.id),
+                PostingCert(posting_id=older.id, cert_id=aws_saa.id),
                 RawPosting(posting_id=older.id, payload={"url": "https://example.com/wanted-1"}),
                 RawPosting(posting_id=newer.id, payload={"link": "https://example.com/jumpit-1"}),
                 RawPosting(posting_id=frontend.id, payload={"source_url": "https://example.com/wanted-2"}),
@@ -181,3 +188,34 @@ def test_get_postings_paginates_after_filtering_and_sorting(client: TestClient) 
     assert response.json()["page_size"] == 1
     assert response.json()["total"] == 3
     assert len(response.json()["items"]) == 1
+
+
+def test_get_posting_detail_returns_full_posting(client: TestClient) -> None:
+    response = client.get("/api/v1/postings/1")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": 1,
+        "source": "wanted",
+        "pool": "domestic",
+        "company": "Toss",
+        "title": "Backend Engineer",
+        "post_date": "2026-07-01",
+        "close_date": "2026-07-31",
+        "career_min": 3,
+        "career_max": 5,
+        "region": "Seoul",
+        "industry": "fintech",
+        "response_rate": 0.82,
+        "categories": ["backend"],
+        "skills": ["Python", "Spring"],
+        "certs": ["AWS SAA"],
+        "url": "https://example.com/wanted-1",
+    }
+
+
+def test_get_posting_detail_returns_404_for_missing_posting(client: TestClient) -> None:
+    response = client.get("/api/v1/postings/999")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "posting not found"}
