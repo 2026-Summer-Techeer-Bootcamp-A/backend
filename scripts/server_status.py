@@ -219,7 +219,7 @@ def send_discord_notification(webhook_url: str) -> None:
         {
             "name": "⏱️ 크론 스케줄러 (Cron Status)",
             "value": f"• **서비스 상태**: {cron['service']}\n• **등록된 사용자 크론잡**: `{cron['jobs_count']}`개" + 
-                     (f"\n```cron\n" + "\n".join(cron['jobs'][:5]) + ("\n...외 생략" if len(cron['jobs']) > 5 else "") + "\n```" if cron['jobs'] else "") +
+                     ("\n```cron\n" + "\n".join(cron['jobs'][:5]) + ("\n...외 생략" if len(cron['jobs']) > 5 else "") + "\n```" if cron['jobs'] else "") +
                      f"\n• **다음 발송 예정 시각**: `{next_run_str}` (8시간 간격)",
             "inline": False
         }
@@ -280,7 +280,7 @@ def send_slack_notification(webhook_url: str) -> None:
         {
             "title": "⏱️ 크론 스케줄러 (Cron Status)",
             "value": f"• 서비스 상태: {cron['service']}\n• 등록된 사용자 크론잡: `{cron['jobs_count']}`개" + 
-                     (f"\n```cron\n" + "\n".join(cron['jobs'][:5]) + ("\n...외 생략" if len(cron['jobs']) > 5 else "") + "\n```" if cron['jobs'] else "") +
+                     ("\n```cron\n" + "\n".join(cron['jobs'][:5]) + ("\n...외 생략" if len(cron['jobs']) > 5 else "") + "\n```" if cron['jobs'] else "") +
                      f"\n• 다음 발송 예정 시각: `{next_run_str}` (8시간 간격)",
             "short": False
         }

@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -77,7 +78,7 @@ def test_get_cert_gap_by_resume_id(client: TestClient) -> None:
         ],
         "owned": [{"name": "AWS Certified Developer"}],
         "gap": [{"name": "PMP", "share": 0.5}],
-        "as_of": "2026-07-08",
+        "as_of": date.today().isoformat(),
         "sample_size": 2,
     }
 
@@ -103,7 +104,7 @@ def test_get_cert_gap_returns_empty_gap_when_no_matching_postings(client: TestCl
         "required": [],
         "owned": [{"name": "AWS Certified Developer"}],
         "gap": [],
-        "as_of": "2026-07-08",
+        "as_of": date.today().isoformat(),
         "sample_size": 0,
     }
 
@@ -140,7 +141,7 @@ def test_get_cert_gap_uses_empty_owned_for_existing_session_id(
             {"name": "AWS Certified Developer", "share": 0.5},
             {"name": "PMP", "share": 0.5},
         ],
-        "as_of": "2026-07-08",
+        "as_of": date.today().isoformat(),
         "sample_size": 2,
     }
 
