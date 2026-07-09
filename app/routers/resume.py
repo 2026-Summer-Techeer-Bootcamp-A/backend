@@ -9,18 +9,21 @@ from app.crud.resume import (
     get_resume_list,
     update_resume,
 )
-from app.core.redis import create_resume_confirm_session
+from app.core.redis import create_resume_confirm_session, get_resume_confirm_session
 from app.schemas.resume import (
     ResumeConfirmRequest,
     ResumeConfirmResponse,
     ResumeCreateRequest,
     ResumeCreateResponse,
     ResumeDetailResponse,
+    ResumeFeedbackRequest,
+    ResumeFeedbackResponse,
     ResumeListResponse,
     ResumeParseResponse,
     ResumeUpdateRequest,
     ResumeUpdateResponse,
 )
+from app.services.resume_feedback import generate_resume_feedback
 from app.services.resume import parse_resume_pdf
 
 router = APIRouter()
@@ -51,6 +54,25 @@ def get_user_resumes(
 ) -> ResumeListResponse:
     items = get_resume_list(session, user_id=current_user.id)
     return ResumeListResponse(items=items)
+
+
+@router.post(
+    "/feedback",
+    response_model=ResumeFeedbackResponse,
+    status_code=status.HTTP_200_OK,
+)
+def create_resume_feedback(payload: ResumeFeedbackRequest) -> ResumeFeedbackResponse:
+    confirmed = get_resume_confirm_session(payload.session_id)
+    if confirmed is None or not confirmed.get("skills"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume session not found",
+        )
+
+    return generate_resume_feedback(
+        skills=confirmed["skills"],
+        position=payload.position,
+    )
 
 
 @router.get(

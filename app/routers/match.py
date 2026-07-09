@@ -8,8 +8,10 @@ from app.core.deps import SessionDep
 from app.core.redis import is_token_blocklisted
 from app.core.security import ALGORITHM, SECRET_KEY
 from app.models.user import User
-from app.schemas.match import MatchGapResponse, Pool
+from app.schemas.match import MatchCoverageResponse,MatchGapResponse,MatchWhatIfResponse, Pool
 from app.services.match import (
+    calculate_what_if_response,
+    calculate_coverage_response,
     calculate_gap_response,
     get_skill_ids_from_resume,
     get_skill_ids_from_session,
@@ -99,5 +101,90 @@ def get_match_gap(
         session=session,
         pool=pool,
         position=position,
+        owned_skill_ids=owned_skill_ids,
+    )
+
+@router.get(
+    "/coverage",
+    response_model=MatchCoverageResponse,
+)
+def get_match_coverage(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
+    session_id: Annotated[str | None, Query(description="비로그인 분석 세션 ID")] = None,
+    position: Annotated[str | None, Query(description="직무 필터")] = None,
+    top_k: Annotated[int, Query(ge=1, le=100, description="상위 요구 기술 수")] = 20,
+    authorization: Annotated[str | None, Header()] = None,
+) -> MatchCoverageResponse:
+    if resume_id is None and session_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="resume_id or session_id is required",
+        )
+
+    if resume_id is not None:
+        current_user = get_user_from_optional_authorization(session, authorization)
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            )
+
+        owned_skill_ids = get_skill_ids_from_resume(
+            session=session,
+            resume_id=resume_id,
+            current_user=current_user,
+        )
+    else: #resume/confirm
+        owned_skill_ids = get_skill_ids_from_session(session_id=session_id)
+
+    return calculate_coverage_response(
+        session=session,
+        pool=pool,
+        position=position,
+        owned_skill_ids=owned_skill_ids,
+        top_k=top_k,
+    )
+
+@router.get(
+    "/what-if",
+    response_model=MatchWhatIfResponse,
+    response_model_exclude_none=True,
+)
+def get_match_what_if(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    add: Annotated[str, Query(description="가상으로 추가할 canonical 기술명")],
+    resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
+    session_id: Annotated[str | None, Query(description="비로그인 분석 세션 ID")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> MatchWhatIfResponse:
+    if resume_id is None and session_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="resume_id or session_id is required",
+        )
+
+    if resume_id is not None:
+        current_user = get_user_from_optional_authorization(session, authorization)
+        if current_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            )
+
+        owned_skill_ids = get_skill_ids_from_resume(
+            session=session,
+            resume_id=resume_id,
+            current_user=current_user,
+        )
+    else:
+        owned_skill_ids = get_skill_ids_from_session(session_id=session_id)
+
+    return calculate_what_if_response(
+        session=session,
+        pool=pool,
+        add=add,
         owned_skill_ids=owned_skill_ids,
     )
