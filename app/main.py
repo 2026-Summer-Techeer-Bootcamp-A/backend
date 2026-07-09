@@ -17,6 +17,7 @@ from app.routers.job_categories import router as job_categories_router
 from app.routers.resume import router as resume_router
 from app.routers.skills import router as skills_router
 from app.routers.match import router as match_router
+from app.routers.posting import router as posting_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ app.include_router(job_categories_router, prefix="/api/v1", tags=["job-categorie
 app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
 app.include_router(skills_router, tags=["skills"])
 app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
+app.include_router(posting_router, prefix="/api/v1", tags=["postings"])
 
 
 class PersonOut(BaseModel):
