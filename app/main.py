@@ -13,10 +13,12 @@ from app.core.db import engine
 from app.core.db import Base
 from app.routers.auth import router as auth_router
 from app.routers.cert import router as cert_router
+from app.routers.job_categories import router as job_categories_router
 from app.routers.resume import router as resume_router
 from app.routers.skills import router as skills_router
 from app.routers.match import router as match_router
 from app.routers.posting_map import router as posting_map_router
+from app.routers.company import router as company_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -45,10 +47,10 @@ templates = Jinja2Templates(directory=templates_dir)
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(cert_router, prefix="/api/v1", tags=["cert"])
+app.include_router(job_categories_router, prefix="/api/v1", tags=["job-categories"])
 app.include_router(resume_router, prefix="/api/v1/resume", tags=["resume"])
 app.include_router(skills_router, tags=["skills"])
 app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
-app.include_router(posting_map_router, prefix="/api/v1", tags=["map"])
 
 
 class PersonOut(BaseModel):
