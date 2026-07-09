@@ -37,5 +37,12 @@ def create_resume_confirm_session(payload: dict[str, Any], ttl_seconds: int) -> 
     raise RuntimeError("could not allocate unique resume session id")
 
 
+def get_resume_confirm_session(session_id: str) -> dict[str, Any] | None:
+    value = redis_client.get(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}")
+    if value is None:
+        return None
+    return json.loads(value)
+
+
 def resume_confirm_session_exists(session_id: str) -> bool:
     return redis_client.exists(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}") > 0
