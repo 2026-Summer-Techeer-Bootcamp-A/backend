@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Posting, PostingCategory, PostingTech, RawPosting, Resume, ResumeSkill, Skill
+from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
 
 
 def get_resume_skill_ids(session: Session, *, resume_id: int, user_id: int) -> set[int]:
@@ -85,6 +85,39 @@ def list_posting_cards(
     return cards[offset : offset + page_size], total
 
 
+def get_posting_detail(session: Session, *, posting_id: int) -> dict:
+    posting = session.execute(
+        select(Posting).where(
+            Posting.id == posting_id,
+            Posting.is_deleted.is_(False),
+        )
+    ).scalar_one_or_none()
+    if posting is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="posting not found")
+
+    skill_map, _skill_id_map = _get_posting_skills(session, [posting.id])
+    url_map = _get_posting_urls(session, [posting.id])
+
+    return {
+        "id": posting.id,
+        "source": posting.source,
+        "pool": posting.pool,
+        "company": posting.company,
+        "title": posting.title,
+        "post_date": posting.post_date,
+        "close_date": posting.close_date,
+        "career_min": posting.career_min,
+        "career_max": posting.career_max,
+        "region": _format_region(posting),
+        "industry": posting.industry,
+        "response_rate": posting.response_rate,
+        "categories": _get_posting_categories(session, posting.id),
+        "skills": skill_map.get(posting.id, []),
+        "certs": _get_posting_certs(session, posting.id),
+        "url": url_map.get(posting.id, ""),
+    }
+
+
 def _get_filtered_postings(
     session: Session,
     *,
@@ -109,6 +142,36 @@ def _get_filtered_postings(
         stmt = stmt.order_by(Posting.post_date.is_(None), Posting.post_date.desc(), Posting.id.desc())
 
     return list(session.execute(stmt).scalars().unique().all())
+
+
+def _get_posting_categories(session: Session, posting_id: int) -> list[str]:
+    rows = session.execute(
+        select(PostingCategory.category)
+        .where(
+            PostingCategory.posting_id == posting_id,
+            PostingCategory.is_deleted.is_(False),
+        )
+        .order_by(PostingCategory.category.asc())
+    ).scalars()
+    return list(rows)
+
+
+def _get_posting_certs(session: Session, posting_id: int) -> list[str]:
+    rows = session.execute(
+        select(Cert.name)
+        .join(PostingCert, PostingCert.cert_id == Cert.id)
+        .where(
+            PostingCert.posting_id == posting_id,
+            PostingCert.is_deleted.is_(False),
+            Cert.is_deleted.is_(False),
+        )
+        .order_by(Cert.name.asc())
+    ).scalars()
+    return list(rows)
+
+
+def _format_region(posting: Posting) -> str | None:
+    return posting.region_city or posting.region_district or posting.region_country
 
 
 def _get_posting_skills(
