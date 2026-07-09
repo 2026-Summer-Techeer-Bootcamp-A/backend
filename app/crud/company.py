@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.posting import Posting, PostingTech

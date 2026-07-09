@@ -1,9 +1,8 @@
 """GET /company/by-skill 엔드포인트 테스트 (F7+F11)."""
 
 from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app

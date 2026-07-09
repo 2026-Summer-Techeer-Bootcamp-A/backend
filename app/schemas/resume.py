@@ -41,6 +41,18 @@ class ResumeConfirmResponse(BaseModel):
     ttl: int
 
 
+class ResumeFeedbackRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    position: str = Field(min_length=1)
+
+
+class ResumeFeedbackResponse(BaseModel):
+    feedback: list[str]
+    questions: list[str]
+    model: str
+    degraded: bool
+
+
 class ResumeCreateRequest(BaseModel):
     title: str = Field(min_length=1)
     skills: list[ParsedSkill] = Field(min_length=1)
