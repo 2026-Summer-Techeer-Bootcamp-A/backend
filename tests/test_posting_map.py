@@ -41,6 +41,7 @@ class TestValidation:
 class TestPostingsMap:
     """CRUD 레이어를 모킹한 기능 테스트."""
 
+    @patch("app.routers.posting_map.get_clusters", return_value=[])
     @patch("app.routers.posting_map.get_heatmap", return_value=[])
     @patch(
         "app.routers.posting_map.get_map_pins",
@@ -49,7 +50,7 @@ class TestPostingsMap:
             date(2026, 7, 7),
         ),
     )
-    def test_normal_response_with_pins(self, mock_pins, mock_heatmap):
+    def test_normal_response_with_pins(self, mock_pins, mock_heatmap, mock_clusters):
         """정상 조회 시 pins 구조 확인."""
         resp = client.get(ENDPOINT)
         assert resp.status_code == 200
@@ -59,6 +60,7 @@ class TestPostingsMap:
         assert data["pins"][0]["lat"] == 37.49
         assert data["as_of"] == "2026-07-07"
 
+    @patch("app.routers.posting_map.get_clusters", return_value=[])
     @patch(
         "app.routers.posting_map.get_heatmap",
         return_value=[{"region_district": "강남구", "posting_count": 214}],
@@ -67,7 +69,7 @@ class TestPostingsMap:
         "app.routers.posting_map.get_map_pins",
         return_value=([], date(2026, 7, 7)),
     )
-    def test_heatmap_structure(self, mock_pins, mock_heatmap):
+    def test_heatmap_structure(self, mock_pins, mock_heatmap, mock_clusters):
         """히트맵 구조 확인."""
         resp = client.get(ENDPOINT)
         data = resp.json()
@@ -75,36 +77,39 @@ class TestPostingsMap:
         assert data["heatmap"][0]["region_district"] == "강남구"
         assert data["heatmap"][0]["posting_count"] == 214
 
+    @patch("app.routers.posting_map.get_clusters", return_value=[])
     @patch("app.routers.posting_map.get_heatmap", return_value=[])
     @patch(
         "app.routers.posting_map.get_map_pins",
         return_value=([], date(2026, 7, 7)),
     )
-    def test_region_param_passed(self, mock_pins, mock_heatmap):
+    def test_region_param_passed(self, mock_pins, mock_heatmap, mock_clusters):
         """region 파라미터가 CRUD에 전달되는지 확인."""
         resp = client.get(ENDPOINT, params={"region": "서울"})
         assert resp.status_code == 200
         mock_pins.assert_called_once()
         assert mock_pins.call_args.kwargs["region"] == "서울"
 
+    @patch("app.routers.posting_map.get_clusters", return_value=[])
     @patch("app.routers.posting_map.get_heatmap", return_value=[])
     @patch(
         "app.routers.posting_map.get_map_pins",
         return_value=([], date(2026, 7, 7)),
     )
-    def test_bbox_parsed_correctly(self, mock_pins, mock_heatmap):
+    def test_bbox_parsed_correctly(self, mock_pins, mock_heatmap, mock_clusters):
         """bbox 문자열이 tuple로 파싱되어 CRUD에 전달되는지 확인."""
         resp = client.get(ENDPOINT, params={"bbox": "126.9,37.4,127.1,37.6"})
         assert resp.status_code == 200
         mock_pins.assert_called_once()
         assert mock_pins.call_args.kwargs["bbox"] == (126.9, 37.4, 127.1, 37.6)
 
+    @patch("app.routers.posting_map.get_clusters", return_value=[])
     @patch("app.routers.posting_map.get_heatmap", return_value=[])
     @patch(
         "app.routers.posting_map.get_map_pins",
         return_value=([], date(2026, 7, 7)),
     )
-    def test_pool_domestic_accepted(self, mock_pins, mock_heatmap):
+    def test_pool_domestic_accepted(self, mock_pins, mock_heatmap, mock_clusters):
         """pool=domestic은 정상 처리."""
         resp = client.get(ENDPOINT, params={"pool": "domestic"})
         assert resp.status_code == 200

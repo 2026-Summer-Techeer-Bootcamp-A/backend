@@ -4,11 +4,20 @@ from fastapi import HTTPException, status
 from sqlalchemy import Select, distinct, func, select
 from sqlalchemy.orm import Session
 
+from app.models.job_category import JobCategory
 from app.models.posting import Posting, PostingCategory, PostingTech
 from app.models.resume import Resume, ResumeSkill
 from app.models.skill import Skill
 from app.models.user import User
-from app.schemas.match import MatchCoverageResponse, MatchGapResponse, MatchWhatIfResponse,Pool
+from app.schemas.match import (
+    MatchCoverageDistributionResponse,
+    MatchCoverageResponse,
+    MatchGapResponse,
+    MatchPivotMapResponse,
+    MatchRoadmapResponse,
+    MatchWhatIfResponse,
+    Pool,
+)
 from app.core.redis import get_resume_confirm_session
 
 #저장된 이력서에서 기술 가져옴
@@ -331,4 +340,237 @@ def calculate_what_if_response(
         as_of=get_pool_as_of(session=session, pool=pool, position=position),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
+    )
+
+
+def calculate_coverage_distribution_response(
+    session: Session,
+    *,
+    pool: Pool,
+    position: str | None,
+    owned_skill_ids: set[int],
+    threshold: float = 50.0,
+    min_required_skills: int = 3,
+    bin_size: int = 5,
+) -> MatchCoverageDistributionResponse:
+    """공고별(요구기술 min_required_skills개 이상) 커버리지 분포 히스토그램. widgets 'c-coverage-dist' 정식화."""
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+
+    rows = session.execute(
+        select(PostingTech.posting_id, PostingTech.skill_id)
+        .join(posting_pool_query, posting_pool_query.c.id == PostingTech.posting_id)
+        .where(PostingTech.is_deleted.is_(False))
+    ).all()
+
+    posting_skills: dict[int, set[int]] = {}
+    for posting_id, skill_id in rows:
+        posting_skills.setdefault(posting_id, set()).add(skill_id)
+
+    eligible = {pid: skills for pid, skills in posting_skills.items() if len(skills) >= min_required_skills}
+
+    bin_count = 100 // bin_size
+    bins = [0] * bin_count
+    matched = 0
+    coverages: list[float] = []
+    for skills in eligible.values():
+        pct = len(skills & owned_skill_ids) / len(skills) * 100
+        coverages.append(pct)
+        bin_index = min(int(pct // bin_size), bin_count - 1)
+        bins[bin_index] += 1
+        if pct >= threshold:
+            matched += 1
+
+    total = len(eligible)
+
+    coverage_score = calculate_coverage_response(
+        session=session,
+        pool=pool,
+        position=position,
+        owned_skill_ids=owned_skill_ids,
+    ).coverage_score
+
+    my_percentile = round(sum(1 for c in coverages if c <= coverage_score) / total * 100, 1) if total else 0.0
+
+    return MatchCoverageDistributionResponse(
+        pool=pool,
+        coverage_score=coverage_score,
+        histogram=[{"range_start": i * bin_size, "count": count} for i, count in enumerate(bins)],
+        my_percentile=my_percentile,
+        matched=matched,
+        total=total,
+        threshold=threshold,
+        as_of=get_pool_as_of(session=session, pool=pool, position=position),
+        sample_size=total,
+        sample_warning=True if total < 50 else None,
+        note=f"요구기술 {min_required_skills}개 이상 공고만 집계 · 히스토그램 bin={bin_size}%",
+    )
+
+
+def calculate_roadmap_response(
+    session: Session,
+    *,
+    pool: Pool,
+    position: str | None,
+    owned_skill_ids: set[int],
+    steps: int = 5,
+    threshold: float = 50.0,
+    candidate_pool_size: int = 30,
+) -> MatchRoadmapResponse:
+    """미보유 기술 중 매 단계 매칭 공고 수를 가장 많이 늘리는 기술을 탐욕적으로 선택. widgets 'y1-learning-path' 정식화."""
+    market_skills, sample_size = get_market_skill_frequencies(session=session, pool=pool, position=position)
+    candidates = {
+        s["skill_id"]: s for s in market_skills if s["skill_id"] not in owned_skill_ids
+    }
+    candidates = dict(list(candidates.items())[:candidate_pool_size])
+
+    current_owned = set(owned_skill_ids)
+    matched_before = count_matched_postings(session=session, pool=pool, position=position, skill_ids=current_owned)
+    start_matched = matched_before
+
+    step_results = []
+    for step_no in range(1, steps + 1):
+        if not candidates:
+            break
+
+        best_skill_id = None
+        best_matched_after = matched_before
+        for skill_id in candidates:
+            matched_after = count_matched_postings(
+                session=session, pool=pool, position=position, skill_ids=current_owned | {skill_id}
+            )
+            if matched_after > best_matched_after:
+                best_matched_after = matched_after
+                best_skill_id = skill_id
+
+        if best_skill_id is None:
+            break
+
+        chosen = candidates.pop(best_skill_id)
+        current_owned.add(best_skill_id)
+        step_results.append(
+            {
+                "step": step_no,
+                "canonical": chosen["canonical"],
+                "category": chosen["category"],
+                "matched_after": best_matched_after,
+                "delta": best_matched_after - matched_before,
+                "freq": round(chosen["freq"], 4),
+            }
+        )
+        matched_before = best_matched_after
+
+    return MatchRoadmapResponse(
+        pool=pool,
+        start_matched=start_matched,
+        total=sample_size,
+        threshold=threshold,
+        steps=step_results,
+        as_of=get_pool_as_of(session=session, pool=pool, position=position),
+        sample_size=sample_size,
+        sample_warning=True if sample_size < 50 else None,
+    )
+
+
+def get_industry_skill_frequencies(session: Session, pool: Pool, industry: str) -> tuple[list[dict], int]:
+    base_filters = [Posting.pool == pool, Posting.industry == industry, Posting.is_deleted.is_(False)]
+
+    sample_size = session.scalar(select(func.count()).select_from(Posting).where(*base_filters)) or 0
+    if sample_size == 0:
+        return [], 0
+
+    rows = session.execute(
+        select(
+            Skill.id.label("skill_id"),
+            Skill.canonical,
+            Skill.category,
+            (func.count(distinct(PostingTech.posting_id)) / sample_size).label("freq"),
+        )
+        .select_from(Posting)
+        .join(PostingTech, PostingTech.posting_id == Posting.id)
+        .join(Skill, Skill.id == PostingTech.skill_id)
+        .where(*base_filters, PostingTech.is_deleted.is_(False), Skill.is_deleted.is_(False))
+        .group_by(Skill.id, Skill.canonical, Skill.category)
+        .order_by(func.count(distinct(PostingTech.posting_id)).desc())
+    ).all()
+
+    return [
+        {"skill_id": r.skill_id, "canonical": r.canonical, "category": r.category, "freq": float(r.freq)}
+        for r in rows
+    ], sample_size
+
+
+def get_category_targets(session: Session, pool: Pool, limit: int) -> list[tuple[str, int]]:
+    rows = session.execute(
+        select(PostingCategory.category, func.count(distinct(Posting.id)).label("n"))
+        .select_from(Posting)
+        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
+        .join(JobCategory, JobCategory.name == PostingCategory.category)
+        .where(
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            PostingCategory.is_deleted.is_(False),
+            JobCategory.is_tech.is_(True),
+            JobCategory.is_deleted.is_(False),
+        )
+        .group_by(PostingCategory.category)
+        .order_by(func.count(distinct(Posting.id)).desc())
+        .limit(limit)
+    ).all()
+    return [(row.category, row.n) for row in rows]
+
+
+def get_industry_targets(session: Session, pool: Pool, limit: int) -> list[tuple[str, int]]:
+    rows = session.execute(
+        select(Posting.industry, func.count().label("n"))
+        .where(Posting.pool == pool, Posting.industry.isnot(None), Posting.is_deleted.is_(False))
+        .group_by(Posting.industry)
+        .order_by(func.count().desc())
+        .limit(limit)
+    ).all()
+    return [(row.industry, row.n) for row in rows]
+
+
+def calculate_pivot_map_response(
+    session: Session,
+    *,
+    pool: Pool,
+    owned_skill_ids: set[int],
+    kind: str = "both",
+    limit: int = 10,
+    top_k_skills: int = 15,
+) -> MatchPivotMapResponse:
+    """직군·산업별 상위 요구기술 대비 내 커버리지("커리어 피벗 맵"). widgets 'y2-pivot-map' 정식화."""
+    targets_out: list[dict] = []
+    total_sample = 0
+
+    def _build_target(name: str, n: int, kind_label: str, skills: list[dict]) -> dict:
+        top = skills[:top_k_skills]
+        owned = sum(1 for s in top if s["skill_id"] in owned_skill_ids)
+        missing = [
+            {"canonical": s["canonical"], "freq": round(s["freq"], 4)}
+            for s in top
+            if s["skill_id"] not in owned_skill_ids
+        ]
+        coverage = round(owned / len(top) * 100, 1) if top else 0.0
+        return {"name": name, "kind": kind_label, "coverage": coverage, "missing": missing, "n": n}
+
+    if kind in ("category", "both"):
+        for name, n in get_category_targets(session, pool, limit):
+            skills, _ = get_market_skill_frequencies(session=session, pool=pool, position=name)
+            targets_out.append(_build_target(name, n, "category", skills))
+            total_sample += n
+
+    if kind in ("industry", "both"):
+        for name, n in get_industry_targets(session, pool, limit):
+            skills, _ = get_industry_skill_frequencies(session, pool, name)
+            targets_out.append(_build_target(name, n, "industry", skills))
+            total_sample += n
+
+    targets_out.sort(key=lambda t: t["coverage"], reverse=True)
+
+    return MatchPivotMapResponse(
+        pool=pool,
+        targets=targets_out,
+        as_of=date.today().isoformat(),
+        sample_size=total_sample,
     )
