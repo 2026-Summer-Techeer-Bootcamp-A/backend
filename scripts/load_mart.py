@@ -46,3 +46,90 @@ def parse_datetime(value: str | None) -> datetime | None:
 
 def has_hangul(text: str) -> bool:
     return any("가" <= ch <= "힣" for ch in text)
+
+
+from collections.abc import Iterable
+
+AMBIGUOUS_KEY = "_ambiguous_llm_fallback"
+
+
+def build_skill_rows(
+    taxonomy: dict, extra_techs: Iterable[str]
+) -> tuple[list[dict], list[dict]]:
+    skills: dict[str, dict] = {}
+    aliases: list[dict] = []
+    seen_alias: set[str] = set()
+
+    def add_aliases(canonical: str, alias_list) -> None:
+        if not isinstance(alias_list, list):
+            return
+        for a in alias_list:
+            key = a.lower()
+            if key in seen_alias:
+                continue
+            seen_alias.add(key)
+            aliases.append(
+                {"canonical": canonical, "alias": a, "is_korean": has_hangul(a)}
+            )
+
+    for category, entries in taxonomy.items():
+        if category.startswith("_") or not isinstance(entries, dict):
+            continue
+        for canonical, alias_list in entries.items():
+            if canonical not in skills:
+                skills[canonical] = {
+                    "canonical": canonical,
+                    "category": category,
+                    "is_ambiguous": False,
+                }
+            add_aliases(canonical, alias_list)
+
+    for canonical, alias_list in taxonomy.get(AMBIGUOUS_KEY, {}).items():
+        if canonical.startswith("_") or not isinstance(alias_list, list):
+            continue
+        if canonical in skills:
+            skills[canonical]["is_ambiguous"] = True
+        else:
+            skills[canonical] = {
+                "canonical": canonical,
+                "category": "ambiguous",
+                "is_ambiguous": True,
+            }
+        add_aliases(canonical, alias_list)
+
+    for tech in extra_techs:
+        if tech and tech not in skills:
+            skills[tech] = {
+                "canonical": tech,
+                "category": "uncategorized",
+                "is_ambiguous": False,
+            }
+
+    return list(skills.values()), aliases
+
+
+def build_cert_names(cert_taxonomy: dict, extra_certs: Iterable[str]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for category, entries in cert_taxonomy.items():
+        if category.startswith("_") or not isinstance(entries, dict):
+            continue
+        for name in entries:
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+    for name in extra_certs:
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def build_category_names(mart_categories: Iterable[str]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for name in mart_categories:
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
