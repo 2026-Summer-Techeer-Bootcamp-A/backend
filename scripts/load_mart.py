@@ -8,9 +8,20 @@
 import sqlite3
 from datetime import date, datetime
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.core.db import Base
+from app.models import (
+    Cert,
+    JobCategory,
+    Posting,
+    PostingCategory,
+    PostingCert,
+    PostingTech,
+    RawPosting,
+    Skill,
+    SkillAlias,
+)
 
 DOMESTIC_SOURCES = {"wanted", "jumpit"}
 
@@ -183,3 +194,37 @@ def distinct_categories(mart: sqlite3.Connection) -> list[str]:
     return [
         r[0] for r in mart.execute("SELECT DISTINCT category FROM fact_posting_category")
     ]
+
+
+def seed_dicts(
+    conn,
+    skill_rows: list[dict],
+    alias_rows: list[dict],
+    cert_names: list[str],
+    category_names: list[str],
+) -> tuple[dict[str, int], dict[str, int]]:
+    _insert_chunked(conn, Skill.__table__, skill_rows)
+    skill_id = {
+        row.canonical: row.id
+        for row in conn.execute(select(Skill.id, Skill.canonical))
+    }
+    alias_params = [
+        {
+            "skill_id": skill_id[a["canonical"]],
+            "alias": a["alias"],
+            "is_korean": a["is_korean"],
+        }
+        for a in alias_rows
+        if a["canonical"] in skill_id
+    ]
+    _insert_chunked(conn, SkillAlias.__table__, alias_params)
+
+    _insert_chunked(conn, Cert.__table__, [{"name": n} for n in cert_names])
+    cert_id = {row.name: row.id for row in conn.execute(select(Cert.id, Cert.name))}
+
+    _insert_chunked(
+        conn,
+        JobCategory.__table__,
+        [{"name": n, "is_tech": False} for n in category_names],
+    )
+    return skill_id, cert_id
