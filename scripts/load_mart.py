@@ -5,7 +5,12 @@
         python -m scripts.load_mart
 """
 
+import sqlite3
 from datetime import date, datetime
+
+from sqlalchemy import text
+
+from app.core.db import Base
 
 DOMESTIC_SOURCES = {"wanted", "jumpit"}
 
@@ -133,3 +138,48 @@ def build_category_names(mart_categories: Iterable[str]) -> list[str]:
             seen.add(name)
             names.append(name)
     return names
+
+
+def open_mart(path: str) -> sqlite3.Connection:
+    """mart.db 파일을 열고 Row 팩토리를 설정해 반환."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def ensure_schema(engine) -> None:
+    """대상 DB에 전체 ORM 스키마를 생성(idempotent)."""
+    Base.metadata.create_all(bind=engine)
+
+
+def wipe(conn) -> None:
+    """대상 DB의 모든 애플리케이션 테이블을 비운다(스키마 유지)."""
+    if conn.dialect.name == "postgresql":
+        tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+        conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+    else:
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(table.delete())
+
+
+def _insert_chunked(conn, table, rows: list[dict], size: int = 5000) -> None:
+    """행 리스트를 size별로 청크로 나눠 테이블에 삽입."""
+    for i in range(0, len(rows), size):
+        conn.execute(table.insert(), rows[i : i + size])
+
+
+def distinct_techs(mart: sqlite3.Connection) -> list[str]:
+    """mart에서 모든 고유한 기술 목록을 추출."""
+    return [r[0] for r in mart.execute("SELECT DISTINCT tech FROM fact_posting_tech")]
+
+
+def distinct_certs(mart: sqlite3.Connection) -> list[str]:
+    """mart에서 모든 고유한 자격증 목록을 추출."""
+    return [r[0] for r in mart.execute("SELECT DISTINCT cert FROM fact_posting_cert")]
+
+
+def distinct_categories(mart: sqlite3.Connection) -> list[str]:
+    """mart에서 모든 고유한 카테고리 목록을 추출."""
+    return [
+        r[0] for r in mart.execute("SELECT DISTINCT category FROM fact_posting_category")
+    ]
