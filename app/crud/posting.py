@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from datetime import date, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -40,9 +41,13 @@ def list_posting_cards(
     user_id: int | None,
     page: int,
     page_size: int,
+    district: str | None = None,
+    deadline_within_days: int | None = None,
+    min_match: float | None = None,
 ) -> tuple[list[dict], int]:
+    needs_owned_skills = (match_only or min_match is not None) and resume_id is not None and user_id is not None
     owned_skill_ids: set[int] = set()
-    if match_only and resume_id is not None and user_id is not None:
+    if needs_owned_skills:
         owned_skill_ids = get_resume_skill_ids(
             session,
             resume_id=resume_id,
@@ -54,6 +59,8 @@ def list_posting_cards(
         pool=pool,
         position=position,
         sort=sort,
+        district=district,
+        deadline_within_days=deadline_within_days,
     )
     posting_ids = [posting.id for posting in postings]
     skill_map, skill_id_map = _get_posting_skills(session, posting_ids)
@@ -61,10 +68,17 @@ def list_posting_cards(
 
     cards = []
     for posting in postings:
+        required_ids = skill_id_map.get(posting.id, set())
         matched_count = None
-        if match_only:
-            matched_count = len(skill_id_map.get(posting.id, set()) & owned_skill_ids)
-            if matched_count < 1:
+        if match_only or min_match is not None:
+            matched_count = len(required_ids & owned_skill_ids)
+
+        if match_only and matched_count < 1:
+            continue
+
+        if min_match is not None:
+            match_pct = (matched_count / len(required_ids) * 100) if required_ids else 0.0
+            if match_pct < min_match:
                 continue
 
         card = {
@@ -124,6 +138,8 @@ def _get_filtered_postings(
     pool: str | None,
     position: str | None,
     sort: str,
+    district: str | None = None,
+    deadline_within_days: int | None = None,
 ) -> list[Posting]:
     stmt = select(Posting).where(Posting.is_deleted.is_(False))
 
@@ -134,6 +150,17 @@ def _get_filtered_postings(
         stmt = stmt.join(PostingCategory, PostingCategory.posting_id == Posting.id).where(
             PostingCategory.category == position,
             PostingCategory.is_deleted.is_(False),
+        )
+
+    if district is not None:
+        stmt = stmt.where(Posting.region_district.ilike(f"%{district}%"))
+
+    if deadline_within_days is not None:
+        today = date.today()
+        stmt = stmt.where(
+            Posting.close_date.isnot(None),
+            Posting.close_date >= today,
+            Posting.close_date <= today + timedelta(days=deadline_within_days),
         )
 
     if sort == "deadline":
