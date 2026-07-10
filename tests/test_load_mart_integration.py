@@ -8,6 +8,7 @@ from scripts.load_mart import (
     distinct_certs,
     distinct_techs,
     ensure_schema,
+    load_postings,  # noqa: E402
     seed_dicts,
     wipe,
 )
@@ -52,3 +53,30 @@ def test_seed_dicts_inserts_and_returns_maps():
             text("SELECT is_ambiguous FROM skill WHERE canonical='React'")
         ).scalar()
         assert bool(ambiguous) is True
+
+
+def test_load_postings_maps_fields_and_pool():
+    engine = make_target()
+    mart = make_mart()
+    with engine.begin() as conn:
+        id_map = load_postings(conn, mart)
+    assert set(id_map) == {"jumpit:111", "himalayas:222"}
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT source, source_uid, pool, region_country, region_city, "
+                "post_date, seniority_raw FROM posting WHERE source='jumpit'"
+            )
+        ).one()
+    assert row.source_uid == "111"
+    assert row.pool == "domestic"
+    assert row.region_country == "KR"
+    assert row.region_city == "서울 강남구 논현로65길22"
+    assert str(row.post_date) == "2026-07-01"
+    assert row.seniority_raw == "Senior"
+    with engine.connect() as conn:
+        glob = conn.execute(
+            text("SELECT pool, region_country FROM posting WHERE source='himalayas'")
+        ).one()
+    assert glob.pool == "global"
+    assert glob.region_country is None

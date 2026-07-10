@@ -228,3 +228,42 @@ def seed_dicts(
         [{"name": n, "is_tech": False} for n in category_names],
     )
     return skill_id, cert_id
+
+
+def load_postings(conn, mart, limit: int | None = None) -> dict[str, int]:
+    """fact_posting을 posting으로 변환·적재, "source:uid" -> posting.id 맵 반환."""
+    query = (
+        "SELECT posting_id, source, company, title, post_date, close_date, "
+        "career_min, career_max, region, industry, seniority FROM fact_posting"
+    )
+    if limit is not None:
+        query += f" LIMIT {int(limit)}"
+
+    rows: list[dict] = []
+    for r in mart.execute(query):
+        source, uid = split_posting_id(r["posting_id"])
+        rows.append(
+            {
+                "source": source,
+                "source_uid": uid,
+                "pool": derive_pool(source),
+                "company": r["company"],
+                "title": r["title"] or "",
+                "post_date": parse_date(r["post_date"]),
+                "close_date": parse_date(r["close_date"]),
+                "career_min": r["career_min"],
+                "career_max": r["career_max"],
+                "seniority_raw": r["seniority"],
+                "region_country": region_country_for(source),
+                "region_city": r["region"],
+                "industry": r["industry"],
+            }
+        )
+    _insert_chunked(conn, Posting.__table__, rows)
+
+    return {
+        f"{source}:{uid}": pid
+        for pid, source, uid in conn.execute(
+            select(Posting.id, Posting.source, Posting.source_uid)
+        )
+    }
