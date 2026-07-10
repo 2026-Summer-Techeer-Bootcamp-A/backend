@@ -9,6 +9,7 @@ services:
       - "${APP_PORT:-8000}:8000"
     volumes:
       - .:/app
+      - ../gh-hn-data-collector/collector:/opt/collector
     command:
       - uvicorn
       - app.main:app
