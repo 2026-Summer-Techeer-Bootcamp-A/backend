@@ -89,12 +89,24 @@ def generate_data(db: Session):
     print("2. Generating Users and Resumes...")
     users = []
     hashed_pw = hash_password("password123!")
-    for _ in range(20):
+    
+    # Create default admin user
+    admin_user = User(
+        email="admin@example.com",
+        password_hash=hashed_pw,
+        nickname="System Admin",
+        is_admin=True,
+    )
+    db.add(admin_user)
+    users.append(admin_user)
+
+    for _ in range(19):
         email = fake.unique.email()
         user = User(
             email=email,
             password_hash=hashed_pw,
             nickname=fake.user_name(),
+            is_admin=False,
         )
         db.add(user)
         users.append(user)
