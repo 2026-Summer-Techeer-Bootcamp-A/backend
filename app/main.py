@@ -24,6 +24,7 @@ from app.routers.company import router as company_router
 from app.routers.insight import router as insight_router
 from app.routers.github_insight import router as github_insight_router
 from app.routers.admin import router as admin_router
+from app.routers.chat import router as chat_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -133,6 +134,7 @@ app.include_router(company_router, prefix="/api/v1", tags=["company"])
 app.include_router(insight_router, prefix="/api/v1", tags=["insight"])
 app.include_router(github_insight_router, prefix="/api/v1", tags=["github-insight"])
 app.include_router(admin_router, prefix="/api/v1", tags=["admin"])
+app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 
 
 class PersonOut(BaseModel):
