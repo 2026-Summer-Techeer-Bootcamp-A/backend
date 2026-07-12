@@ -13,3 +13,4 @@ pypdf>=5.0,<6.0
 PyJWT
 redis
 email-validator
+requests
