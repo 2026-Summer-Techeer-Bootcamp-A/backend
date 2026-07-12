@@ -241,9 +241,13 @@ def sample_techs(role, k):
 
 
 def gen_users(db: Session):
-    users = [User(email="admin@example.com", password_hash=hash_pw("password123!"),
-                  nickname="System Admin", is_admin=True)]
-    db.add(users[0])
+    # admin은 wipe()가 보존하므로 재실행 시 중복 생성하지 않는다(email 유니크).
+    admin = db.query(User).filter(User.email == "admin@example.com").first()
+    if admin is None:
+        admin = User(email="admin@example.com", password_hash=hash_pw("password123!"),
+                     nickname="System Admin", is_admin=True)
+        db.add(admin)
+    users = [admin]
     for _ in range(N_USERS - 1):
         users.append(User(email=fake.unique.email(), password_hash=hash_pw("password123!"),
                           nickname=fake.user_name(), is_admin=False))
@@ -333,9 +337,11 @@ def gen_postings(db: Session, skills, certs):
     db.flush()  # id 부여
     # 팩트: tech/cert/category/raw
     for i, p in enumerate(postings):
-        db.add(PostingCategory(posting_id=p.id, category=p._role))
+        cats = {p._role}
         if random.random() < 0.25:
-            db.add(PostingCategory(posting_id=p.id, category=pick_role()))
+            cats.add(pick_role())  # 보조 카테고리(주 카테고리와 겹치면 무시 — (posting_id, category) 유니크)
+        for cat in cats:
+            db.add(PostingCategory(posting_id=p.id, category=cat))
         techs = sample_techs(p._role, random.randint(2, 6))
         for t in techs:
             s = skill_by.get(t)
