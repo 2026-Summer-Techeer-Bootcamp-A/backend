@@ -7,6 +7,14 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "info"
 
+    # 브라우저 CORS 허용 오리진(프론트가 별도 도메인이라 필수). 끝에 슬래시 없이.
+    # .env에서 JSON 배열로 덮어쓸 수 있음: CORS_ALLOW_ORIGINS=["https://a.com","https://b.com"]
+    cors_allow_origins: list[str] = [
+        "https://frontend-tan-chi-25.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ]
+
     # TODO: consumed by the future DB connection layer (SQLAlchemy engine / session).
     database_url: str = "postgresql+psycopg://appuser:change-me@db:5432/appdb"
 
