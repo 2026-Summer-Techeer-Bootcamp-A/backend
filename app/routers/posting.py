@@ -36,6 +36,13 @@ def get_postings(
     sort: Annotated[PostingSort, Query(description="latest 또는 deadline")] = "latest",
     match_only: Annotated[bool, Query(description="이력서와 매칭되는 공고만 조회")] = False,
     resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
+    district: Annotated[str | None, Query(description="지역(구/동) 필터. region_district 부분일치")] = None,
+    deadline_within_days: Annotated[
+        int | None, Query(ge=1, le=365, description="마감까지 N일 이내인 공고만 조회")
+    ] = None,
+    min_match: Annotated[
+        float | None, Query(ge=0, le=100, description="최소 매칭률(%). resume_id 필요")
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     authorization: Annotated[str | None, Header()] = None,
@@ -46,14 +53,14 @@ def get_postings(
             detail="sort=deadline is only supported for domestic postings",
         )
 
-    user_id = None
-    if match_only:
-        if resume_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="resume_id is required when match_only=true",
-            )
+    if (match_only or min_match is not None) and resume_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="resume_id is required when match_only=true or min_match is set",
+        )
 
+    user_id = None
+    if match_only or min_match is not None:
         current_user = get_user_from_optional_authorization(session, authorization)
         if current_user is None:
             raise HTTPException(
@@ -72,6 +79,9 @@ def get_postings(
         user_id=user_id,
         page=page,
         page_size=page_size,
+        district=district,
+        deadline_within_days=deadline_within_days,
+        min_match=min_match,
     )
 
     return PostingListResponse(

@@ -20,6 +20,8 @@ from app.routers.match import router as match_router
 from app.routers.posting import router as posting_router
 from app.routers.posting_map import router as posting_map_router
 from app.routers.company import router as company_router
+from app.routers.insight import router as insight_router
+from app.routers.github_insight import router as github_insight_router
 from app.routers.admin import router as admin_router
 from contextlib import asynccontextmanager
 
@@ -116,6 +118,8 @@ app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
 app.include_router(posting_map_router, prefix="/api/v1", tags=["posting-map"])
 app.include_router(posting_router, prefix="/api/v1", tags=["postings"])
 app.include_router(company_router, prefix="/api/v1", tags=["company"])
+app.include_router(insight_router, prefix="/api/v1", tags=["insight"])
+app.include_router(github_insight_router, prefix="/api/v1", tags=["github-insight"])
 app.include_router(admin_router, prefix="/api/v1", tags=["admin"])
 
 
