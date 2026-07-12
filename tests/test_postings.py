@@ -54,6 +54,8 @@ def client() -> Iterator[TestClient]:
             region_city="Seoul",
             industry="fintech",
             response_rate=0.82,
+            lat=37.566500,
+            lng=126.978000,
         )
         newer = Posting(
             source="jumpit",
@@ -205,6 +207,8 @@ def test_get_posting_detail_returns_full_posting(client: TestClient) -> None:
         "career_min": 3,
         "career_max": 5,
         "region": "Seoul",
+        "lat": 37.5665,
+        "lng": 126.978,
         "industry": "fintech",
         "response_rate": 0.82,
         "categories": ["backend"],
@@ -219,3 +223,19 @@ def test_get_posting_detail_returns_404_for_missing_posting(client: TestClient) 
 
     assert response.status_code == 404
     assert response.json() == {"detail": "posting not found"}
+
+
+def test_get_posting_detail_returns_lat_lng_for_domestic_posting(client: TestClient) -> None:
+    response = client.get("/api/v1/postings/1")
+
+    assert response.status_code == 200
+    assert response.json()["lat"] == 37.5665
+    assert response.json()["lng"] == 126.978
+
+
+def test_get_posting_detail_returns_none_lat_lng_when_missing(client: TestClient) -> None:
+    response = client.get("/api/v1/postings/2")
+
+    assert response.status_code == 200
+    assert response.json().get("lat") is None
+    assert response.json().get("lng") is None
