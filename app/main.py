@@ -22,6 +22,7 @@ from app.routers.posting_map import router as posting_map_router
 from app.routers.company import router as company_router
 from app.routers.insight import router as insight_router
 from app.routers.github_insight import router as github_insight_router
+from app.routers.admin import router as admin_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -29,6 +30,66 @@ async def lifespan(app: FastAPI):
     # 애플리케이션 시작 시, SQLAlchemy 모델들을 기반으로 DB에 아직 없는 테이블들을 모두 자동 생성합니다.
     # 추후 Alembic 등 마이그레이션 도구가 정착되면 제거할 개발 편의성 코드입니다.
     Base.metadata.create_all(bind=engine)
+    
+    with engine.begin() as conn:
+        conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;'))
+        
+        # Create mv_skill_share materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_skill_share AS
+            WITH pool_pos_total AS (
+                SELECT
+                    p.pool,
+                    pc.category AS position,
+                    COUNT(DISTINCT p.id) AS total_postings
+                FROM posting p
+                JOIN posting_category pc ON pc.posting_id = p.id AND pc.is_deleted = false
+                WHERE p.is_deleted = false
+                GROUP BY p.pool, pc.category
+            )
+            SELECT
+                p.pool,
+                pc.category AS position,
+                pt.skill_id,
+                s.canonical AS skill_canonical,
+                COUNT(DISTINCT p.id) AS posting_count,
+                total_postings,
+                (COUNT(DISTINCT p.id)::float / NULLIF(total_postings, 0)) AS share
+            FROM posting p
+            JOIN posting_category pc ON pc.posting_id = p.id AND pc.is_deleted = false
+            JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+            JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = false
+            JOIN pool_pos_total ppt ON ppt.pool = p.pool AND ppt.position = pc.category
+            WHERE p.is_deleted = false
+            GROUP BY p.pool, pc.category, pt.skill_id, s.canonical, total_postings;
+        """))
+
+        # Create mv_cooccurrence materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_cooccurrence AS
+            WITH skill_totals AS (
+                SELECT
+                    p.pool,
+                    pt.skill_id,
+                    COUNT(DISTINCT p.id) AS skill_total_postings
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+                WHERE p.is_deleted = false
+                GROUP BY p.pool, pt.skill_id
+            )
+            SELECT
+                p.pool,
+                pt1.skill_id AS skill_id_1,
+                pt2.skill_id AS skill_id_2,
+                COUNT(DISTINCT p.id) AS co_count,
+                (COUNT(DISTINCT p.id)::float / NULLIF(st.skill_total_postings, 0)) AS co_rate
+            FROM posting p
+            JOIN posting_tech pt1 ON pt1.posting_id = p.id AND pt1.is_deleted = false
+            JOIN posting_tech pt2 ON pt2.posting_id = p.id AND pt2.is_deleted = false AND pt2.skill_id <> pt1.skill_id
+            JOIN skill_totals st ON st.pool = p.pool AND st.skill_id = pt1.skill_id
+            WHERE p.is_deleted = false
+            GROUP BY p.pool, pt1.skill_id, pt2.skill_id, st.skill_total_postings;
+        """))
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
@@ -59,6 +120,7 @@ app.include_router(posting_router, prefix="/api/v1", tags=["postings"])
 app.include_router(company_router, prefix="/api/v1", tags=["company"])
 app.include_router(insight_router, prefix="/api/v1", tags=["insight"])
 app.include_router(github_insight_router, prefix="/api/v1", tags=["github-insight"])
+app.include_router(admin_router, prefix="/api/v1", tags=["admin"])
 
 
 class PersonOut(BaseModel):

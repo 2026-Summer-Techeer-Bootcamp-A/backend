@@ -20,6 +20,7 @@ class UserResponse(BaseModel):
     id: int
     email: str
     nickname: str | None = None
+    is_admin: bool
 
 
 class Token(BaseModel):
