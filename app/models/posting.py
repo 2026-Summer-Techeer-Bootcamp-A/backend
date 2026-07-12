@@ -18,6 +18,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
+
 from app.core.db import Base
 from app.models.mixins import SoftDeleteMixin, TimestampMixin
 
@@ -121,8 +123,9 @@ class PostingEmbedding(TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "posting_embedding"
 
     id: Mapped[int] = mapped_column(ForeignKey("posting.id"), primary_key=True)
+    # 차원은 config.embedding_dim(=1024, BGE-M3)에서 단일 소스로 참조 — 하드코딩 금지.
     embedding: Mapped[list[float]] = mapped_column(
-        Text().with_variant(Vector(1536), "postgresql"), nullable=False
+        Text().with_variant(Vector(settings.embedding_dim), "postgresql"), nullable=False
     )
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
 
