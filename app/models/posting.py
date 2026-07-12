@@ -25,6 +25,7 @@ from app.models.mixins import SoftDeleteMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.cert import Cert
+    from app.models.concept import Concept
     from app.models.skill import Skill
 
 
@@ -39,7 +40,8 @@ class Posting(TimestampMixin, SoftDeleteMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source: Mapped[str] = mapped_column(Text, nullable=False, index=True)
-    source_uid: Mapped[str] = mapped_column(String(64), nullable=False)
+    # URL을 uid로 쓰는 소스(himalayas/wwr/wanted)가 있어 64자로는 부족 → Text.
+    source_uid: Mapped[str] = mapped_column(Text, nullable=False)
     pool: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     company: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
@@ -60,6 +62,7 @@ class Posting(TimestampMixin, SoftDeleteMixin, Base):
     techs: Mapped[list["PostingTech"]] = relationship(back_populates="posting")
     certs: Mapped[list["PostingCert"]] = relationship(back_populates="posting")
     categories: Mapped[list["PostingCategory"]] = relationship(back_populates="posting")
+    concepts: Mapped[list["PostingConcept"]] = relationship(back_populates="posting")
     embedding: Mapped["PostingEmbedding | None"] = relationship(back_populates="posting", uselist=False)
 
 
@@ -115,6 +118,20 @@ class PostingCategory(TimestampMixin, SoftDeleteMixin, Base):
     category: Mapped[str] = mapped_column(String(64), nullable=False)
 
     posting: Mapped[Posting] = relationship(back_populates="categories")
+
+
+class PostingConcept(TimestampMixin, SoftDeleteMixin, Base):
+    """공고 ↔ 개념 (N:M). 개념 채택 흐름·연도 트렌드·개념 기반 추천의 근거."""
+
+    __tablename__ = "posting_concept"
+    __table_args__ = (UniqueConstraint("posting_id", "concept_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    posting_id: Mapped[int] = mapped_column(ForeignKey("posting.id"), nullable=False, index=True)
+    concept_id: Mapped[int] = mapped_column(ForeignKey("concept.id"), nullable=False, index=True)
+
+    posting: Mapped[Posting] = relationship(back_populates="concepts")
+    concept: Mapped["Concept"] = relationship()
 
 
 class PostingEmbedding(TimestampMixin, SoftDeleteMixin, Base):
