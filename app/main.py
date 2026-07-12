@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, ConfigDict
 import os
@@ -93,6 +94,15 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
+
+# 프론트(별도 Vercel 도메인)의 브라우저 요청 허용 — 없으면 프리플라이트 OPTIONS가 405로 막힘.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 Instrumentator().instrument(app).expose(app)
