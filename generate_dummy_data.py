@@ -27,6 +27,7 @@ from faker import Faker
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.db import Base, SessionLocal, engine
 from app.models import (
     Cert, CollectorRun, InterestSignal, JobCategory, Posting, PostingCategory,
@@ -359,8 +360,8 @@ def gen_postings(db: Session, skills, certs):
     db.commit()
     # 임베딩(일부)
     for p in random.sample(postings, min(N_EMBED, len(postings))):
-        vec = [round(random.gauss(0, 1), 4) for _ in range(1536)]
-        db.add(PostingEmbedding(id=p.id, embedding=vec, model="dummy-random-1536"))
+        vec = [round(random.gauss(0, 1), 4) for _ in range(settings.embedding_dim)]
+        db.add(PostingEmbedding(id=p.id, embedding=vec, model=f"dummy-random-{settings.embedding_dim}"))
     db.commit()
     return postings
 
