@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, ConfigDict
 import os
@@ -93,6 +94,17 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
+
+# 프론트(Vercel) <-> 백엔드(GCP) 간 cross-origin 요청 허용.
+# Bearer 토큰 인증이라 쿠키가 없으므로 allow_credentials는 False로 충분하다.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.cors_origin_regex,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 Instrumentator().instrument(app).expose(app)

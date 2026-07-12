@@ -7,6 +7,17 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "info"
 
+    # 브라우저에서 API를 호출하는 프론트엔드 오리진 화이트리스트.
+    # 로컬 개발 서버 + 프로덕션 Vercel 도메인을 기본값으로 둔다.
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://frontend-tan-chi-25.vercel.app",
+    ]
+    # Vercel 프리뷰 배포는 서브도메인이 매번 바뀌므로, 해당 프로젝트의
+    # 프리뷰 URL만 정규식으로 허용한다. (와일드카드로 전체 vercel.app를 열지 않음)
+    cors_origin_regex: str = r"https://frontend-tan-chi-25-[a-z0-9-]+\.vercel\.app"
+
     # TODO: consumed by the future DB connection layer (SQLAlchemy engine / session).
     database_url: str = "postgresql+psycopg://appuser:change-me@db:5432/appdb"
 
