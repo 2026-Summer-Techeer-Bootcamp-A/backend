@@ -323,9 +323,16 @@
                 <div id="admin-status-res" style="font-family: monospace; font-size: 0.75rem; margin-bottom: 1rem; background: var(--panel-bg); padding: 0.5rem; border-radius: 4px;"></div>
                 
                 <hr style="border:0; border-top: 1px solid var(--panel-border); margin-bottom: 1rem;">
-                <div style="display: flex; gap: 0.5rem;">
-                    <input type="text" id="admin-source" class="input-control" placeholder="소스 (예: himalayas) 입력. 비우면 전체 실행">
-                    <button class="btn" style="color: var(--danger); border-color: var(--danger);" onclick="doAdminRun()">수동 실행 트리거 (POST /api/v1/admin/collector/run)</button>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="admin-source" class="input-control" placeholder="소스 (예: himalayas) 입력. 비우면 전체 실행" style="flex: 2;">
+                        <input type="number" id="admin-limit" class="input-control" placeholder="제한 건수" style="flex: 1;">
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="number" id="admin-from" class="input-control" placeholder="시작 연도 (예: 2021)" style="flex: 1;">
+                        <input type="number" id="admin-to" class="input-control" placeholder="종료 연도 (예: 2026)" style="flex: 1;">
+                    </div>
+                    <button class="btn" style="color: var(--danger); border-color: var(--danger); width: 100%;" onclick="doAdminRun()">수동 실행 트리거 (POST /api/v1/admin/collector/run)</button>
                 </div>
             </div>
         </div>
