@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.posting import Posting, PostingCategory, PostingTech
+from app.models.posting import Posting, PostingTech
 from app.models.skill import Skill
 from app.schemas.match import Pool
 from app.schemas.stats import (
@@ -12,6 +12,7 @@ from app.schemas.stats import (
     SkillShareItem,
     SkillShareResponse,
 )
+from app.services.match import build_posting_pool_query
 
 
 def get_skill_share_response(
@@ -21,20 +22,8 @@ def get_skill_share_response(
     position: str | None,
     limit: int,
 ) -> SkillShareResponse:
-    posting_query = select(Posting.id).where(
-        Posting.pool == pool,
-        Posting.is_deleted.is_(False),
-    )
-
-    if position:
-        posting_query = posting_query.join(
-            PostingCategory, PostingCategory.posting_id == Posting.id
-        ).where(
-            PostingCategory.category == position,
-            PostingCategory.is_deleted.is_(False),
-        )
-
-    posting_pool = posting_query.subquery()
+    # 커버리지·갭과 동일한 대상 풀 정의를 공유한다(직무 미지정 시 기술직 필터 포함).
+    posting_pool = build_posting_pool_query(pool=pool, position=position).subquery()
 
     sample_size = session.scalar(select(func.count()).select_from(posting_pool)) or 0
 
