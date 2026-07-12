@@ -1,4 +1,5 @@
 from app.models.cert import Cert
+from app.models.github import GithubRepoSnapshot, GithubStarHistory
 from app.models.collector_run import CollectorRun
 from app.models.interest_signal import InterestSignal
 from app.models.job_category import JobCategory
@@ -17,6 +18,8 @@ from app.models.user import User
 
 __all__ = [
     "Cert",
+    "GithubRepoSnapshot",
+    "GithubStarHistory",
     "CollectorRun",
     "InterestSignal",
     "JobCategory",

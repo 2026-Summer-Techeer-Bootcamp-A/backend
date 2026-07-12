@@ -56,3 +56,68 @@ class MatchWhatIfResponse(BaseModel):
     as_of: str
     sample_size: int
     sample_warning: bool | None = None
+
+
+class CoverageHistogramBin(BaseModel):
+    range_start: int  # 0, 5, 10 ... 95 (bin_size 폭)
+    count: int
+
+
+class MatchCoverageDistributionResponse(BaseModel):
+    """공고별 커버리지 분포 히스토그램 + 내 위치. widgets 'c-coverage-dist' 정식화."""
+
+    pool: Pool
+    coverage_score: float = Field(ge=0, le=100)
+    histogram: list[CoverageHistogramBin]
+    my_percentile: float = Field(ge=0, le=100)
+    matched: int
+    total: int
+    threshold: float
+    as_of: str
+    sample_size: int
+    sample_warning: bool | None = None
+    note: str
+
+
+class RoadmapStepOut(BaseModel):
+    step: int
+    canonical: str
+    category: str
+    matched_after: int
+    delta: int
+    freq: float = Field(ge=0, le=1)
+
+
+class MatchRoadmapResponse(BaseModel):
+    """탐욕적 최적 학습 순서. widgets 'y1-learning-path' 정식화."""
+
+    pool: Pool
+    start_matched: int
+    total: int
+    threshold: float
+    steps: list[RoadmapStepOut]
+    as_of: str
+    sample_size: int
+    sample_warning: bool | None = None
+
+
+class PivotMissingSkillOut(BaseModel):
+    canonical: str
+    freq: float = Field(ge=0, le=1)
+
+
+class PivotTargetOut(BaseModel):
+    name: str
+    kind: Literal["category", "industry"]
+    coverage: float = Field(ge=0, le=100)
+    missing: list[PivotMissingSkillOut]
+    n: int
+
+
+class MatchPivotMapResponse(BaseModel):
+    """직군/산업별 상위 요구기술 대비 내 커버리지. widgets 'y2-pivot-map' 정식화."""
+
+    pool: Pool
+    targets: list[PivotTargetOut]
+    as_of: str
+    sample_size: int
