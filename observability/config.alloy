@@ -1,5 +1,5 @@
 local.file_match "system" {
-  path_targets = [{ __path__ = "/var/log/*.log" }]
+  path_targets = [{ __path__ = "/var/log/*.log", job = "varlogs", host = "docker-host" }]
 }
 
 loki.source.file "system" {
