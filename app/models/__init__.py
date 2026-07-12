@@ -1,4 +1,5 @@
 from app.models.cert import Cert
+from app.models.concept import Concept
 from app.models.github import GithubRepoSnapshot, GithubStarHistory
 from app.models.collector_run import CollectorRun
 from app.models.interest_signal import InterestSignal
@@ -8,6 +9,7 @@ from app.models.posting import (
     Posting,
     PostingCategory,
     PostingCert,
+    PostingConcept,
     PostingEmbedding,
     PostingTech,
     RawPosting,
@@ -19,6 +21,7 @@ from app.models.user import User
 
 __all__ = [
     "Cert",
+    "Concept",
     "GithubRepoSnapshot",
     "GithubStarHistory",
     "CollectorRun",
@@ -28,6 +31,7 @@ __all__ = [
     "Posting",
     "PostingCategory",
     "PostingCert",
+    "PostingConcept",
     "PostingEmbedding",
     "PostingTech",
     "RawPosting",
