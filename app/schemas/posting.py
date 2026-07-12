@@ -38,6 +38,8 @@ class PostingDetailResponse(BaseModel):
     career_min: int | None
     career_max: int | None
     region: str | None
+    lat: float | None = None
+    lng: float | None = None
     industry: str | None
     response_rate: float | None
     categories: list[str]

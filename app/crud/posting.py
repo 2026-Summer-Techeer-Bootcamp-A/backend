@@ -123,6 +123,8 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
         "career_min": posting.career_min,
         "career_max": posting.career_max,
         "region": _format_region(posting),
+        "lat": posting.lat,
+        "lng": posting.lng,
         "industry": posting.industry,
         "response_rate": posting.response_rate,
         "categories": _get_posting_categories(session, posting.id),
