@@ -19,6 +19,7 @@ from app.routers.skills import router as skills_router
 from app.routers.match import router as match_router
 from app.routers.posting_map import router as posting_map_router
 from app.routers.company import router as company_router
+from app.routers.stats import router as stats_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -53,6 +54,7 @@ app.include_router(skills_router, tags=["skills"])
 app.include_router(match_router, prefix="/api/v1/match", tags=["match"])
 app.include_router(posting_map_router, prefix="/api/v1", tags=["posting-map"])
 app.include_router(company_router, prefix="/api/v1", tags=["company"])
+app.include_router(stats_router, prefix="/api/v1", tags=["stats"])
 
 
 class PersonOut(BaseModel):

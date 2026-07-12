@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import Select, distinct, func, select
 from sqlalchemy.orm import Session
 
+from app.models.job_category import JobCategory
 from app.models.posting import Posting, PostingCategory, PostingTech
 from app.models.resume import Resume, ResumeSkill
 from app.models.skill import Skill
@@ -58,6 +59,7 @@ def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
     )
 
     if position:
+        # 특정 직무로 좁힐 땐 그 카테고리 자체가 대상 필터가 된다.
         query = (
             query.join(PostingCategory, PostingCategory.posting_id == Posting.id)
             .where(
@@ -65,6 +67,21 @@ def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
                 PostingCategory.is_deleted.is_(False),
             )
         )
+    else:
+        # 직무 미지정이면 기술직 공고만 남긴다. 비기술 직군(Sales·CS·Marketing 등)이
+        # 섞이면 요구빈도 순위가 왜곡되므로, 빈도 산출 전에 반드시 걸러야 한다.
+        # EXISTS로 상관 서브쿼리를 쓰면 공고가 여러 기술 카테고리를 가져도 중복되지 않는다.
+        tech_posting = (
+            select(PostingCategory.id)
+            .join(JobCategory, JobCategory.name == PostingCategory.category)
+            .where(
+                PostingCategory.posting_id == Posting.id,
+                PostingCategory.is_deleted.is_(False),
+                JobCategory.is_tech.is_(True),
+                JobCategory.is_deleted.is_(False),
+            )
+        )
+        query = query.where(tech_posting.exists())
 
     return query
 

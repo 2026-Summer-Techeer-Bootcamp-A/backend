@@ -3,7 +3,12 @@
     "allow": [
       "Bash(python -m pip install --user -q -r requirements.txt)",
       "Bash(python -m pytest tests/test_stats_api.py -q)",
-      "Bash(python -m pytest -q)"
+      "Bash(python -m pytest -q)",
+      "PowerShell(python -m pytest tests/test_stats_api.py -q 2>&1)",
+      "PowerShell(python -c \"import app.main; print\\('ok'\\)\" 2>&1)",
+      "PowerShell(python -m pytest -q 2>&1)",
+      "Bash(git stash *)",
+      "Bash(python -m pytest tests/test_postings.py -q)"
     ]
   }
 }

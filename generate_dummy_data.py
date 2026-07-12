@@ -35,6 +35,9 @@ CATEGORIES = [
     "Customer Service", "Marketing", "Operations", "HR", "Finance"
 ]
 
+# 기술직 필터(빈도 산출 전 비기술 직군 제외)의 근거가 되는 통제 어휘.
+TECH_CATEGORIES = {"Developer", "Data Science", "Product", "Design"}
+
 CERTS = [
     "AWS Solutions Architect", "PMP", "CISSP", "CISM",
     "AWS Certified", "CISA", "CEH", "AWS Developer", "정보처리기사", "CKA"
@@ -72,8 +75,10 @@ def generate_data(db: Session):
     for name in CATEGORIES:
         cat = db.query(JobCategory).filter_by(name=name).first()
         if not cat:
-            cat = JobCategory(name=name)
+            cat = JobCategory(name=name, is_tech=name in TECH_CATEGORIES)
             db.add(cat)
+        else:
+            cat.is_tech = name in TECH_CATEGORIES
         category_objs.append(cat)
 
     cert_objs = []
