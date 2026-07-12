@@ -418,7 +418,16 @@ async function doAdminStatus() {
 }
 
 async function doAdminRun() {
-    const src = document.getElementById('admin-source').value;
-    const body = src ? { source: src } : {};
+    const src = document.getElementById('admin-source').value.trim();
+    const limitVal = document.getElementById('admin-limit').value;
+    const fromVal = document.getElementById('admin-from').value;
+    const toVal = document.getElementById('admin-to').value;
+
+    const body = {};
+    if (src) body.source = src;
+    if (limitVal) body.limit = parseInt(limitVal, 10);
+    if (fromVal) body.from_year = parseInt(fromVal, 10);
+    if (toVal) body.to_year = parseInt(toVal, 10);
+
     await fetchApi('POST', '/admin/collector/run', body);
 }
