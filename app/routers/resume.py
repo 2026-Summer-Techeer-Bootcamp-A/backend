@@ -9,6 +9,7 @@ from app.crud.resume import (
     get_resume_list,
     update_resume,
 )
+from app.crud.resume_preference import get_resume_preferences, upsert_resume_preferences
 from app.core.redis import create_resume_confirm_session, get_resume_confirm_session
 from app.schemas.resume import (
     ResumeConfirmRequest,
@@ -23,6 +24,7 @@ from app.schemas.resume import (
     ResumeUpdateRequest,
     ResumeUpdateResponse,
 )
+from app.schemas.resume_preference import ResumePreferences
 from app.services.resume_feedback import generate_resume_feedback
 from app.services.resume import parse_resume_pdf
 
@@ -117,6 +119,50 @@ def update_user_resume(
             detail="resume not found",
         )
     return ResumeUpdateResponse(resume_id=resume.resume_id)
+
+
+@router.get(
+    "/{resume_id}/preferences",
+    response_model=ResumePreferences,
+    status_code=status.HTTP_200_OK,
+)
+def get_user_resume_preferences(
+    resume_id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumePreferences:
+    preferences = get_resume_preferences(session, resume_id=resume_id, user_id=current_user.id)
+    if preferences is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume preferences not found",
+        )
+    return preferences
+
+
+@router.put(
+    "/{resume_id}/preferences",
+    response_model=ResumePreferences,
+    status_code=status.HTTP_200_OK,
+)
+def update_user_resume_preferences(
+    resume_id: int,
+    payload: ResumePreferences,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumePreferences:
+    preferences = upsert_resume_preferences(
+        session,
+        resume_id=resume_id,
+        user_id=current_user.id,
+        preferences_in=payload,
+    )
+    if preferences is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return preferences
 
 
 @router.delete(

@@ -13,6 +13,7 @@ from app.models.posting import (
     RawPosting,
 )
 from app.models.resume import Resume, ResumeCert, ResumeSkill
+from app.models.resume_preference import ResumePreference
 from app.models.skill import Skill, SkillAlias
 from app.models.user import User
 
@@ -32,6 +33,7 @@ __all__ = [
     "RawPosting",
     "Resume",
     "ResumeCert",
+    "ResumePreference",
     "ResumeSkill",
     "Skill",
     "SkillAlias",
