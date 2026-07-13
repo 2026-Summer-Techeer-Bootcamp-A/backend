@@ -33,6 +33,42 @@ _JK_NAV_MARKERS = (
 )
 _ADMIN_RE = re.compile(r"^\S*[시군구]$")
 
+_JK_BLOCK_TAGS = {
+    "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt",
+    "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+    "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table",
+    "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+}
+_JK_SECTION_TITLES = {
+    "소개": "소개",
+    "모집요강": "모집 요강",
+    "모집분야": "모집 분야",
+    "상세요강": "상세 설명",
+    "담당업무": "주요 업무",
+    "주요업무": "주요 업무",
+    "업무내용": "주요 업무",
+    "직무내용": "주요 업무",
+    "지원자격": "자격 요건",
+    "자격요건": "자격 요건",
+    "지원조건": "자격 요건",
+    "응시자격": "자격 요건",
+    "우대사항": "우대 사항",
+    "근무조건": "근무 조건",
+    "근무환경": "근무 환경",
+    "채용절차": "채용 절차",
+    "전형절차": "채용 절차",
+    "접수기간": "접수 기간",
+    "접수기간및방법": "접수 기간 및 방법",
+    "접수방법": "접수 방법",
+    "복리후생": "혜택 및 복지",
+    "혜택및복지": "혜택 및 복지",
+}
+_JK_NOISE_EXACT = {
+    "잡코리아", "채용정보", "채용정보홈", "메뉴건너뛰기", "본문바로가기",
+    "스크랩", "공유하기", "인쇄하기", "기업정보보기", "지원하기",
+}
+_JK_NAV_WORDS = {"채용정보", "기업정보", "인재검색", "합격자소서", "연봉", "커리어"}
+
 
 class _TagStrip(HTMLParser):
     def __init__(self):
@@ -52,6 +88,137 @@ def strip_html(text: str | None) -> str:
     except Exception:
         return html.unescape(re.sub(r"<[^>]+>", " ", text))
     return html.unescape(" ".join(p.parts))
+
+
+class _JobKoreaTagStrip(HTMLParser):
+    """잡코리아 상세 HTML에서 블록과 목록 경계를 보존한다."""
+
+    def __init__(self):
+        super().__init__()
+        self.lines: list[str] = []
+        self.parts: list[str] = []
+        self.in_list_item = False
+
+    def _flush(self) -> None:
+        line = re.sub(r"\s+", " ", " ".join(self.parts)).strip()
+        if line:
+            prefix = "• " if self.in_list_item and not line.startswith(("•", "-")) else ""
+            self.lines.append(prefix + line)
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in _JK_BLOCK_TAGS:
+            self._flush()
+        if tag == "li":
+            self.in_list_item = True
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in _JK_BLOCK_TAGS:
+            self._flush()
+        if tag == "li":
+            self.in_list_item = False
+
+    def handle_data(self, data):
+        value = html.unescape(data).strip()
+        if value:
+            self.parts.append(value)
+
+    def close(self):
+        super().close()
+        self._flush()
+
+
+def _strip_jobkorea_html(text: str | None) -> str:
+    if not text:
+        return ""
+    parser = _JobKoreaTagStrip()
+    try:
+        parser.feed(text)
+        parser.close()
+        return "\n".join(parser.lines)
+    except Exception:
+        return strip_html(text)
+
+
+def _jobkorea_heading_key(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", text).lower()
+
+
+def _match_jobkorea_heading(line: str) -> tuple[str, str] | None:
+    key = _jobkorea_heading_key(line)
+    if key in _JK_SECTION_TITLES:
+        return _JK_SECTION_TITLES[key], ""
+
+    match = re.match(r"^\s*([^:：]{2,20})\s*[:：]\s*(.+)$", line)
+    if not match:
+        return None
+    title_key = _jobkorea_heading_key(match.group(1))
+    title = _JK_SECTION_TITLES.get(title_key)
+    return (title, match.group(2).strip()) if title else None
+
+
+def _is_jobkorea_noise(line: str) -> bool:
+    key = _jobkorea_heading_key(line)
+    if key in _JK_NOISE_EXACT:
+        return True
+    return sum(word in key for word in _JK_NAV_WORDS) >= 2
+
+
+def _is_jobkorea_footer(line: str) -> bool:
+    key = _jobkorea_heading_key(line)
+    return key == "지도보기" or key.startswith("기업정보")
+
+
+def _split_jobkorea_sections(text: str, posting_title: str | None = None) -> list[dict]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    posting_title_key = _jobkorea_heading_key(posting_title or "")
+    preamble: list[str] = []
+    parsed: list[tuple[str, list[str]]] = []
+    current_title: str | None = None
+    current_lines: list[str] = []
+
+    def flush_current() -> None:
+        nonlocal current_lines
+        if current_title and current_lines:
+            parsed.append((current_title, current_lines))
+        current_lines = []
+
+    for line in lines:
+        if _is_jobkorea_footer(line):
+            break
+
+        heading = _match_jobkorea_heading(line)
+        if heading:
+            flush_current()
+            current_title, inline_text = heading
+            if inline_text:
+                current_lines.append(inline_text)
+            continue
+
+        if current_title is None:
+            key = _jobkorea_heading_key(line)
+            if (posting_title_key and key == posting_title_key) or _is_jobkorea_noise(line):
+                continue
+            preamble.append(line)
+        else:
+            current_lines.append(line)
+
+    flush_current()
+
+    if parsed:
+        return sections([
+            ("소개", "\n".join(preamble)),
+            *((title, "\n".join(content)) for title, content in parsed),
+        ])
+
+    fallback = [
+        line for line in lines
+        if not _is_jobkorea_noise(line)
+        and not (posting_title_key and _jobkorea_heading_key(line) == posting_title_key)
+    ]
+    return sections([("채용 공고 원문", "\n".join(fallback))])
 
 
 def extract_district(address: str | None) -> str | None:
@@ -180,12 +347,16 @@ def from_jobkorea(rec: dict) -> tuple[str, dict] | None:
     cuts = [p for p in (desc.find(mk) for mk in _JK_NAV_MARKERS) if p != -1]
     if cuts:
         desc = desc[: min(cuts)]
+    cleaned_description = _strip_jobkorea_html(desc)
     return str(uid), {
         "logo_url": None,
         "region_district": None,
         "lat": None,
         "lng": None,
-        "desc": sections([("채용 공고 원문", strip_html(desc))]),
+        "desc": _split_jobkorea_sections(
+            cleaned_description,
+            posting_title=rec.get("title"),
+        ),
     }
 
 
@@ -229,7 +400,6 @@ def cmd_apply(in_path: str) -> None:
 
     database_url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://")
     updated = 0
-    skipped_no_match = 0
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
             with gzip.open(in_path, "rt", encoding="utf-8") as f:
