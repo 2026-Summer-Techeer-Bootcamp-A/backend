@@ -19,7 +19,8 @@ from app.schemas.feed import FeedMatch, FeedPostingItem
 _DESCRIPTION_SNIPPET_MAX_LEN = 300
 # 첫 섹션 텍스트가 이 길이보다 짧으면 다음 섹션도 이어붙여 스니펫을 채운다.
 _SHORT_SECTION_THRESHOLD = 80
-_WHITESPACE_RE = re.compile(r"\s+")
+# 줄바꿈(\n)은 불릿 구조를 살리기 위해 보존하고, 한 줄 내부의 연속 공백/탭만 정리한다.
+_INLINE_WHITESPACE_RE = re.compile(r"[ \t\r\f\v]+")
 
 
 def _get_feed_skills(session: Session, posting_ids: list[int]) -> dict[int, list[tuple[int, str]]]:
@@ -97,6 +98,14 @@ def _get_feed_certs(session: Session, posting_ids: list[int]) -> dict[int, list[
     return out
 
 
+def _clean_section_text(text: str) -> str:
+    """섹션 텍스트를 정리한다. 각 줄 내부의 연속 공백/탭만 하나로 줄이고 앞뒤를
+    strip하되, 줄바꿈(\\n) 자체는 원문의 불릿 구조(예: '• 항목1\\n• 항목2')를
+    살리기 위해 보존한다. 빈 줄은 제거한다."""
+    lines = [_INLINE_WHITESPACE_RE.sub(" ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 def _build_description_snippet(description: str | None) -> str | None:
     """Posting.description(JSON 섹션 문자열)에서 피드 카드용 요약 스니펫을 뽑는다.
 
@@ -121,7 +130,7 @@ def _build_description_snippet(description: str | None) -> str | None:
         text = section.get("text")
         if not isinstance(text, str):
             continue
-        cleaned = _WHITESPACE_RE.sub(" ", text).strip()
+        cleaned = _clean_section_text(text)
         if not cleaned:
             continue
         parts.append(cleaned)
@@ -134,7 +143,7 @@ def _build_description_snippet(description: str | None) -> str | None:
     if not parts:
         return None
 
-    snippet = " ".join(parts)
+    snippet = "\n".join(parts)
     if len(snippet) > _DESCRIPTION_SNIPPET_MAX_LEN:
         snippet = snippet[:_DESCRIPTION_SNIPPET_MAX_LEN].rstrip() + "…"
     return snippet
@@ -182,6 +191,7 @@ def _build_feed_items(
                 certs=certs_map.get(p.id, []),
                 seniority=p.seniority_raw,
                 description_snippet=_build_description_snippet(p.description),
+                logo_url=p.logo_url,
                 url=urls.get(p.id, ""),
                 career_min=p.career_min,
                 career_max=p.career_max,
