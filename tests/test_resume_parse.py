@@ -10,6 +10,7 @@ from app.core.db import Base, get_session
 from app.core.security import create_access_token
 from app.main import app
 from app.models.user import User
+from app.models.cert import Cert
 from app.models.resume import Resume, ResumeCert, ResumeSkill
 from app.models.skill import Skill, SkillAlias
 
@@ -35,6 +36,7 @@ def client_with_skill_dictionary() -> Iterator[TestClient]:
                 SkillAlias(skill_id=react.id, alias="리액트", is_korean=True),
             ]
         )
+        seed.add(Cert(name="AWS Certified Solutions Architect"))
         seed.commit()
 
     def override_get_session() -> Iterator[Session]:
@@ -65,7 +67,10 @@ def test_parse_resume_returns_skills_position_and_career(
     monkeypatch.setattr(
         resume_service,
         "extract_pdf_text",
-        lambda _: "Backend developer with 3-5 years using Python, AWS, and 리액트. Also used MysteryTool.",
+        lambda _: (
+            "Backend developer with 3-5 years using Python, AWS, and 리액트. "
+            "Also used MysteryTool. Certified: AWS Certified Solutions Architect."
+        ),
     )
 
     response = client_with_skill_dictionary.post(
@@ -80,6 +85,9 @@ def test_parse_resume_returns_skills_position_and_career(
             {"canonical": "AWS", "category": "unknown", "in_dict": False},
             {"canonical": "React", "category": "frontend", "in_dict": True},
             {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
+        ],
+        "certs": [
+            {"name": "AWS Certified Solutions Architect", "in_dict": True},
         ],
         "position": "backend",
         "career_min": 3,
