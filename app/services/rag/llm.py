@@ -14,7 +14,10 @@ from typing import Any, Protocol
 
 from app.core.config import settings
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
+# 표준 Gemini generateContent 엔드포인트. {model}에 settings.gemini_model이 들어간다.
+GEMINI_URL_TMPL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 
 
 class LLMClient(Protocol):
@@ -68,13 +71,12 @@ class GeminiClient:
         if not settings.gemini_api_key:
             return None
         body = {
-            "model": settings.gemini_model,
-            "system_instruction": system,
-            "input": prompt,
-            "generation_config": {"temperature": temperature},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "systemInstruction": {"parts": [{"text": system}]},
+            "generationConfig": {"temperature": temperature},
         }
         req = urllib.request.Request(
-            GEMINI_URL,
+            GEMINI_URL_TMPL.format(model=settings.gemini_model),
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
