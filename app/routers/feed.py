@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -45,11 +45,16 @@ def read_feed_postings(
     min_match: Annotated[
         int | None, Query(ge=0, le=100, description="최소 매치율(%). 로그인 + 이력서 필요")
     ] = None,
+    sort: Annotated[
+        Literal["latest", "match"],
+        Query(description="latest 또는 match. match는 로그인+이력서 필요 — 없으면 latest로 자동 폴백(에러 없음)"),
+    ] = "latest",
+    industry: Annotated[str | None, Query(description="업종 부분일치(Posting.industry)")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
     authorization: Annotated[str | None, Header()] = None,
 ) -> FeedResponse:
-    """홈 피드용 공고 타임라인 (최신순). 로그인 시 매치 개인화 포함."""
+    """홈 피드용 공고 타임라인 (최신순/매칭순). 로그인 시 매치 개인화 포함."""
     user = get_user_from_optional_authorization(session, authorization)
     owned_skill_ids = (
         _resolve_owned_skill_ids_for_user(session, user) if user is not None else None
@@ -70,6 +75,8 @@ def read_feed_postings(
         district=district,
         deadline_within_days=deadline_within_days,
         min_match=min_match,
+        sort=sort,
+        industry=industry,
     )
     return FeedResponse(
         items=items,

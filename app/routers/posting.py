@@ -80,6 +80,10 @@ def get_postings(
     min_match: Annotated[
         float | None, Query(ge=0, le=100, description="최소 매칭률(%). resume_id 필요")
     ] = None,
+    skills: Annotated[
+        str | None,
+        Query(description="콤마로 구분된 기술 스택 canonical 이름(예: Python,React). 하나라도 일치하면 포함(OR)"),
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     authorization: Annotated[str | None, Header()] = None,
@@ -125,6 +129,7 @@ def get_postings(
         district=district,
         deadline_within_days=deadline_within_days,
         min_match=min_match,
+        skills=skills,
     )
 
     return PostingListResponse(

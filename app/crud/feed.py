@@ -191,14 +191,23 @@ def list_feed_postings(
     district: str | None = None,
     deadline_within_days: int | None = None,
     min_match: int | None = None,
+    sort: str = "latest",
+    industry: str | None = None,
 ) -> tuple[list[FeedPostingItem], int]:
-    if min_match is None:
+    # sort=="match"로 정렬하려면 매치율(item.match.rate)이 필요한데, 이건
+    # 이력서 컨텍스트(owned_skill_ids)가 있어야만 계산된다. 컨텍스트가 없으면
+    # (익명/이력서 없음) 조용히 latest로 폴백한다 — list_posting_cards의
+    # sort=match 폴백과 동일한 철학.
+    needs_python_sort = sort == "match" and owned_skill_ids is not None
+
+    if min_match is None and not needs_python_sort:
         total = _count_filtered_postings(
             session=session,
             pool=pool,
             position=category,
             district=district,
             deadline_within_days=deadline_within_days,
+            industry=industry,
         )
         postings = _get_filtered_postings(
             session=session,
@@ -207,14 +216,16 @@ def list_feed_postings(
             sort="latest",
             district=district,
             deadline_within_days=deadline_within_days,
+            industry=industry,
             limit=page_size,
             offset=(page - 1) * page_size,
         )
         return _build_feed_items(session, postings, owned_skill_ids), total
 
-    # min_match는 페이지를 정하기 전에 매치율을 계산해야 하므로 DB 레벨
-    # LIMIT/OFFSET을 쓸 수 없다. 필터된 공고 전체를 가져와 매치율로 거른 뒤
-    # 파이썬에서 페이지를 자른다. (list_posting_cards의 min_match 분기와 동일 방식)
+    # min_match 또는 sort=match(이력서 컨텍스트 有)는 페이지를 정하기 전에
+    # 매치율을 계산/정렬해야 하므로 DB 레벨 LIMIT/OFFSET을 쓸 수 없다. 필터된
+    # 공고 전체를 가져와 매치율로 거르고/정렬한 뒤 파이썬에서 페이지를 자른다.
+    # (list_posting_cards의 min_match/sort=match 분기와 동일 방식)
     postings = _get_filtered_postings(
         session=session,
         pool=pool,
@@ -222,13 +233,26 @@ def list_feed_postings(
         sort="latest",
         district=district,
         deadline_within_days=deadline_within_days,
+        industry=industry,
     )
     items = _build_feed_items(session, postings, owned_skill_ids)
-    filtered = [
-        item
-        for item in items
-        if (item.match.rate if item.match is not None else 0.0) >= min_match
-    ]
-    total = len(filtered)
+
+    if min_match is not None:
+        items = [
+            item
+            for item in items
+            if (item.match.rate if item.match is not None else 0.0) >= min_match
+        ]
+
+    if needs_python_sort:
+        # _get_filtered_postings가 이미 최신순으로 준 목록을 매치율 내림차순으로
+        # 안정 정렬한다. 매치율이 같으면 기존 최신순이 그대로 유지된다.
+        items = sorted(
+            items,
+            key=lambda item: item.match.rate if item.match is not None else 0.0,
+            reverse=True,
+        )
+
+    total = len(items)
     offset = (page - 1) * page_size
-    return filtered[offset : offset + page_size], total
+    return items[offset : offset + page_size], total

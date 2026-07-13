@@ -14,7 +14,7 @@ from app.core.security import create_access_token
 from app.main import app
 from app.models import Posting, PostingTech, Resume, ResumeSkill, Skill, User
 
-TODAY = date(2026, 7, 10)
+TODAY = date.today()
 
 
 @pytest.fixture
@@ -140,3 +140,45 @@ def test_sort_match_without_resume_context_falls_back_to_latest(client: TestClie
     companies = {item["company"] for item in resp.json()["items"]}
     assert companies == {"Toss", "Woowa", "Kakao"}
     assert all(item.get("matched_count") is None for item in resp.json()["items"])
+
+
+# skills 필터: gangnam_urgent(Toss)=python만, gangnam_far(Woowa)=python+spring,
+# mapo(Kakao)=spring만 요구한다.
+
+
+def test_skills_filter_single_skill_matches_only_postings_with_that_skill(client: TestClient) -> None:
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "skills": "Python"})
+    assert resp.status_code == 200
+    body = resp.json()
+    companies = {item["company"] for item in body["items"]}
+    assert companies == {"Toss", "Woowa"}
+    assert body["total"] == len(body["items"]) == 2
+
+
+def test_skills_filter_or_matches_posting_with_only_one_requested_skill(client: TestClient) -> None:
+    # mapo(Kakao)는 Spring만 요구하는데, Python도 함께 요청해도(OR) 포함돼야 한다.
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "skills": "Python,Spring"})
+    assert resp.status_code == 200
+    body = resp.json()
+    companies = {item["company"] for item in body["items"]}
+    assert companies == {"Toss", "Woowa", "Kakao"}
+    assert body["total"] == len(body["items"]) == 3
+
+    posting_ids = [item["id"] for item in body["items"]]
+    assert len(posting_ids) == len(set(posting_ids))  # 중복 없음 (Woowa는 두 스킬 다 매칭)
+
+
+def test_skills_filter_no_match_returns_empty(client: TestClient) -> None:
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "skills": "Rust"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+
+
+def test_skills_filter_ignores_blank_entries_and_whitespace(client: TestClient) -> None:
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "skills": " Python , , "})
+    assert resp.status_code == 200
+    body = resp.json()
+    companies = {item["company"] for item in body["items"]}
+    assert companies == {"Toss", "Woowa"}

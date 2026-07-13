@@ -293,6 +293,61 @@ def test_feed_min_match_range_validated(client):
     assert res.status_code == 422
 
 
+def test_feed_sort_match_orders_by_match_rate_desc_for_authed_user_with_resume(client, monkeypatch):
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    from app.core.security import create_access_token
+
+    token = create_access_token(1)
+    # 보유=[python, react]. p1=50%(python/aws), p2=100%(react), p3=0%(스킬 없음 -> match=None)
+    res = client.get(
+        "/api/v1/feed/postings",
+        params={"sort": "match"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    titles = [item["title"] for item in body["items"]]
+    assert titles == ["p2 title", "p1 title", "p3 title"]
+    assert body["items"][0]["match"]["rate"] == 100.0
+    assert body["items"][1]["match"]["rate"] == 50.0
+    assert body["items"][2]["match"] is None
+
+
+def test_feed_sort_match_without_auth_falls_back_to_latest(client):
+    res = client.get("/api/v1/feed/postings", params={"sort": "match"})
+    assert res.status_code == 200
+    body = res.json()
+    # 폴백: 인증/이력서 컨텍스트가 없으면 에러 없이 최신순(post_date desc)을 유지한다.
+    titles = [item["title"] for item in body["items"]]
+    assert titles == ["p1 title", "p2 title", "p3 title"]
+    assert all(item["match"] is None for item in body["items"])
+
+
+def test_feed_sort_match_without_resume_falls_back_to_latest(client, monkeypatch):
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    from app.core.security import create_access_token
+
+    token = create_access_token(2)  # noresume@example.com
+    res = client.get(
+        "/api/v1/feed/postings",
+        params={"sort": "match"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    titles = [item["title"] for item in res.json()["items"]]
+    assert titles == ["p1 title", "p2 title", "p3 title"]
+
+
+def test_feed_industry_filter_partial_match(client):
+    res = client.get("/api/v1/feed/postings", params={"industry": "IT"})
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["title"] == "p1 title"
+
+    res = client.get("/api/v1/feed/postings", params={"industry": "제조"})
+    assert res.json()["total"] == 0
+
+
 def test_description_snippet_extraction_handles_html_and_edge_cases():
     from app.crud.feed import _extract_description_snippet
 

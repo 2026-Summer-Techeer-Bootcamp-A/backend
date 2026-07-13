@@ -45,6 +45,7 @@ def list_posting_cards(
     district: str | None = None,
     deadline_within_days: int | None = None,
     min_match: float | None = None,
+    skills: str | None = None,
 ) -> tuple[list[dict], int]:
     needs_owned_skills = (
         (match_only or min_match is not None or sort == "match") and resume_id is not None and user_id is not None
@@ -60,6 +61,7 @@ def list_posting_cards(
             position=position,
             district=district,
             deadline_within_days=deadline_within_days,
+            skills=skills,
         )
         postings = _get_filtered_postings(
             session=session,
@@ -68,6 +70,7 @@ def list_posting_cards(
             sort=sort,
             district=district,
             deadline_within_days=deadline_within_days,
+            skills=skills,
             limit=page_size,
             offset=(page - 1) * page_size,
         )
@@ -107,6 +110,7 @@ def list_posting_cards(
         sort=sort,
         district=district,
         deadline_within_days=deadline_within_days,
+        skills=skills,
     )
     posting_ids = [posting.id for posting in postings]
     skill_map, skill_id_map = _get_posting_skills(session, posting_ids)
@@ -192,6 +196,8 @@ def _apply_posting_filters(
     position: str | None,
     district: str | None,
     deadline_within_days: int | None,
+    skills: str | None = None,
+    industry: str | None = None,
 ):
     """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
     실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
@@ -219,6 +225,28 @@ def _apply_posting_filters(
             Posting.close_date <= today + timedelta(days=deadline_within_days),
         )
 
+    if skills is not None:
+        skill_list = [name.strip() for name in skills.split(",") if name.strip()]
+        if skill_list:
+            # EXISTS 서브쿼리로 필터링한다 — join으로 하면 posting당 여러 기술이
+            # 매칭될 때 Posting 행이 중복돼(1:N) count/dedup을 신경써야 하는데,
+            # EXISTS는 매칭 여부만 보므로 애초에 중복이 생기지 않는다.
+            skill_match = (
+                select(1)
+                .select_from(PostingTech)
+                .join(Skill, Skill.id == PostingTech.skill_id)
+                .where(
+                    PostingTech.posting_id == Posting.id,
+                    PostingTech.is_deleted.is_(False),
+                    Skill.is_deleted.is_(False),
+                    Skill.canonical.in_(skill_list),
+                )
+            )
+            stmt = stmt.where(skill_match.exists())
+
+    if industry is not None:
+        stmt = stmt.where(Posting.industry.ilike(f"%{industry}%"))
+
     return stmt
 
 
@@ -229,6 +257,8 @@ def _count_filtered_postings(
     position: str | None,
     district: str | None = None,
     deadline_within_days: int | None = None,
+    skills: str | None = None,
+    industry: str | None = None,
 ) -> int:
     stmt = _apply_posting_filters(
         select(func.count(distinct(Posting.id))),
@@ -236,6 +266,8 @@ def _count_filtered_postings(
         position=position,
         district=district,
         deadline_within_days=deadline_within_days,
+        skills=skills,
+        industry=industry,
     )
     return session.execute(stmt).scalar_one()
 
@@ -248,6 +280,8 @@ def _get_filtered_postings(
     sort: str,
     district: str | None = None,
     deadline_within_days: int | None = None,
+    skills: str | None = None,
+    industry: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
 ) -> list[Posting]:
@@ -257,6 +291,8 @@ def _get_filtered_postings(
         position=position,
         district=district,
         deadline_within_days=deadline_within_days,
+        skills=skills,
+        industry=industry,
     )
 
     if sort == "deadline":
