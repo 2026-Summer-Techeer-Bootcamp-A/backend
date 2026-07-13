@@ -6,6 +6,8 @@
 """
 
 import sqlite3
+import struct
+from collections.abc import Iterable
 from datetime import date, datetime
 
 from sqlalchemy import select, text
@@ -13,10 +15,13 @@ from sqlalchemy import select, text
 from app.core.db import Base
 from app.models import (
     Cert,
+    Concept,
     JobCategory,
     Posting,
     PostingCategory,
     PostingCert,
+    PostingConcept,
+    PostingEmbedding,
     PostingTech,
     RawPosting,
     Skill,
@@ -63,8 +68,6 @@ def parse_datetime(value: str | None) -> datetime | None:
 def has_hangul(text: str) -> bool:
     return any("가" <= ch <= "힣" for ch in text)
 
-
-from collections.abc import Iterable
 
 AMBIGUOUS_KEY = "_ambiguous_llm_fallback"
 
@@ -151,6 +154,28 @@ def build_category_names(mart_categories: Iterable[str]) -> list[str]:
     return names
 
 
+def build_concept_rows(
+    concepts_taxonomy: dict, extra_concepts: Iterable[str]
+) -> list[dict]:
+    """concepts_taxonomy.json → concept 행. 상위분류(category)를 함께 기록.
+
+    최상위 키는 개념 분류(아키텍처·확장성 등), 각 값은 {개념명: 별칭리스트}.
+    '_'로 시작하는 키(_meta, _excluded_soft_skills 등)는 건너뛴다.
+    """
+    concepts: dict[str, dict] = {}
+    for category, entries in concepts_taxonomy.items():
+        if category.startswith("_") or not isinstance(entries, dict):
+            continue
+        for name in entries:
+            if name.startswith("_"):
+                continue
+            concepts.setdefault(name, {"name": name, "category": category})
+    for name in extra_concepts:
+        if name and name not in concepts:
+            concepts[name] = {"name": name, "category": "uncategorized"}
+    return list(concepts.values())
+
+
 def open_mart(path: str) -> sqlite3.Connection:
     """mart.db 파일을 열고 Row 팩토리를 설정해 반환."""
     conn = sqlite3.connect(path)
@@ -196,6 +221,13 @@ def distinct_categories(mart: sqlite3.Connection) -> list[str]:
     ]
 
 
+def distinct_concepts(mart: sqlite3.Connection) -> list[str]:
+    """mart에서 모든 고유한 개념 목록을 추출."""
+    return [
+        r[0] for r in mart.execute("SELECT DISTINCT concept FROM fact_posting_concept")
+    ]
+
+
 def seed_dicts(
     conn,
     skill_rows: list[dict],
@@ -228,6 +260,14 @@ def seed_dicts(
         [{"name": n, "is_tech": False} for n in category_names],
     )
     return skill_id, cert_id
+
+
+def seed_concepts(conn, concept_rows: list[dict]) -> dict[str, int]:
+    """concept 마스터를 적재하고 name -> id 맵을 반환."""
+    _insert_chunked(conn, Concept.__table__, concept_rows)
+    return {
+        row.name: row.id for row in conn.execute(select(Concept.id, Concept.name))
+    }
 
 
 def load_postings(conn, mart, limit: int | None = None) -> dict[str, int]:
@@ -267,3 +307,210 @@ def load_postings(conn, mart, limit: int | None = None) -> dict[str, int]:
             select(Posting.id, Posting.source, Posting.source_uid)
         )
     }
+
+
+def _load_link(
+    conn,
+    mart,
+    table,
+    id_col: str,
+    query: str,
+    posting_ids: dict[str, int],
+    name_ids: dict[str, int],
+) -> int:
+    """(posting_id, name) 마트 행을 (posting.id, name.id) 링크 행으로 적재.
+
+    posting_ids/name_ids에 없는 항목은 건너뛴다. (posting.id, name.id) 중복 제거.
+    """
+    seen: set[tuple[int, int]] = set()
+    rows: list[dict] = []
+    for pid_str, name in mart.execute(query):
+        tid = posting_ids.get(pid_str)
+        nid = name_ids.get(name)
+        if tid is None or nid is None:
+            continue
+        key = (tid, nid)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"posting_id": tid, id_col: nid})
+    _insert_chunked(conn, table, rows)
+    return len(rows)
+
+
+def load_posting_tech(conn, mart, posting_ids, skill_ids) -> int:
+    return _load_link(
+        conn, mart, PostingTech.__table__, "skill_id",
+        "SELECT posting_id, tech FROM fact_posting_tech", posting_ids, skill_ids,
+    )
+
+
+def load_posting_cert(conn, mart, posting_ids, cert_ids) -> int:
+    return _load_link(
+        conn, mart, PostingCert.__table__, "cert_id",
+        "SELECT posting_id, cert FROM fact_posting_cert", posting_ids, cert_ids,
+    )
+
+
+def load_posting_concept(conn, mart, posting_ids, concept_ids) -> int:
+    return _load_link(
+        conn, mart, PostingConcept.__table__, "concept_id",
+        "SELECT posting_id, concept FROM fact_posting_concept", posting_ids, concept_ids,
+    )
+
+
+def load_posting_category(conn, mart, posting_ids) -> int:
+    """category는 마스터 FK가 아닌 문자열(String(64)). 64자로 절단·중복 제거."""
+    seen: set[tuple[int, str]] = set()
+    rows: list[dict] = []
+    for pid_str, category in mart.execute(
+        "SELECT posting_id, category FROM fact_posting_category"
+    ):
+        tid = posting_ids.get(pid_str)
+        if tid is None or not category:
+            continue
+        cat = category[:64]
+        key = (tid, cat)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"posting_id": tid, "category": cat})
+    _insert_chunked(conn, PostingCategory.__table__, rows)
+    return len(rows)
+
+
+def load_raw_postings(conn, mart, posting_ids) -> int:
+    """raw_posting 원본 JSON을 적재(용량 큼, 기본 제외). payload는 JSON 문자열 파싱."""
+    import json as _json
+
+    rows: list[dict] = []
+    for r in mart.execute(
+        "SELECT posting_id, captured, json FROM raw_posting"
+    ):
+        tid = posting_ids.get(r["posting_id"])
+        if tid is None:
+            continue
+        try:
+            payload = _json.loads(r["json"]) if r["json"] else {}
+        except (ValueError, TypeError):
+            payload = {"_raw": r["json"]}
+        rows.append(
+            {
+                "posting_id": tid,
+                "payload": payload,
+                "captured_at": parse_datetime(r["captured"]),
+            }
+        )
+    _insert_chunked(conn, RawPosting.__table__, rows, size=2000)
+    return len(rows)
+
+
+def load_embeddings(engine, emb_path: str, posting_ids: dict[str, int]) -> int:
+    """embeddings.db(float32 BLOB)를 스트리밍하며 pgvector 컬럼에 청크 적재.
+
+    전량(56.5만)을 메모리에 올리지 않도록 배치마다 flush. vec은 little-endian float32.
+    """
+    src = sqlite3.connect(emb_path)
+    total = 0
+    batch: list[dict] = []
+
+    def flush() -> None:
+        nonlocal total, batch
+        if not batch:
+            return
+        with engine.begin() as c:
+            c.execute(PostingEmbedding.__table__.insert(), batch)
+        total += len(batch)
+        batch = []
+
+    for pid_str, model, dim, vec in src.execute(
+        "SELECT posting_id, model, dim, vec FROM posting_embedding"
+    ):
+        tid = posting_ids.get(pid_str)
+        if tid is None:
+            continue
+        floats = list(struct.unpack(f"<{int(dim)}f", vec))
+        batch.append({"id": tid, "embedding": floats, "model": model})
+        if len(batch) >= 1000:
+            flush()
+    flush()
+    src.close()
+    return total
+
+
+def main() -> None:
+    import argparse
+    import json
+    import os
+
+    from sqlalchemy import create_engine
+
+    from app.core.config import settings
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_taxo = os.path.normpath(
+        os.path.join(repo_root, "..", "data-collector-script")
+    )
+
+    p = argparse.ArgumentParser(description="mart.db + embeddings.db → Postgres 적재")
+    p.add_argument("--mart", required=True, help="mart.db 경로")
+    p.add_argument("--embeddings", default=None, help="embeddings.db 경로(생략 시 벡터 미적재)")
+    p.add_argument("--taxonomy-dir", default=default_taxo, help="taxonomy JSON 디렉터리")
+    p.add_argument("--limit", type=int, default=None, help="공고 수 제한(디버그)")
+    p.add_argument("--with-raw", action="store_true", help="raw_posting 원본 JSON도 적재")
+    p.add_argument(
+        "--database-url",
+        default=os.environ.get("DATABASE_URL", settings.database_url),
+        help="대상 Postgres URL(기본: env DATABASE_URL 또는 settings)",
+    )
+    args = p.parse_args()
+
+    taxo = json.load(open(os.path.join(args.taxonomy_dir, "taxonomy_v2.json")))
+    certs = json.load(open(os.path.join(args.taxonomy_dir, "certs_taxonomy.json")))
+    concepts_taxo = json.load(
+        open(os.path.join(args.taxonomy_dir, "concepts_taxonomy.json"))
+    )
+
+    mart = open_mart(args.mart)
+    engine = create_engine(args.database_url)
+    ensure_schema(engine)
+
+    skill_rows, alias_rows = build_skill_rows(taxo, distinct_techs(mart))
+    cert_names = build_cert_names(certs, distinct_certs(mart))
+    category_names = build_category_names(distinct_categories(mart))
+    concept_rows = build_concept_rows(concepts_taxo, distinct_concepts(mart))
+
+    print(
+        f"[seed] skills={len(skill_rows)} aliases={len(alias_rows)} "
+        f"certs={len(cert_names)} categories={len(category_names)} "
+        f"concepts={len(concept_rows)}"
+    )
+
+    with engine.begin() as conn:
+        wipe(conn)
+        skill_id, cert_id = seed_dicts(
+            conn, skill_rows, alias_rows, cert_names, category_names
+        )
+        concept_id = seed_concepts(conn, concept_rows)
+        posting_ids = load_postings(conn, mart, args.limit)
+        print(f"[postings] {len(posting_ids)}")
+        n_tech = load_posting_tech(conn, mart, posting_ids, skill_id)
+        n_cert = load_posting_cert(conn, mart, posting_ids, cert_id)
+        n_cat = load_posting_category(conn, mart, posting_ids)
+        n_concept = load_posting_concept(conn, mart, posting_ids, concept_id)
+        print(
+            f"[links] tech={n_tech} cert={n_cert} category={n_cat} concept={n_concept}"
+        )
+        if args.with_raw:
+            n_raw = load_raw_postings(conn, mart, posting_ids)
+            print(f"[raw] {n_raw}")
+
+    if args.embeddings:
+        n_emb = load_embeddings(engine, args.embeddings, posting_ids)
+        print(f"[embeddings] {n_emb}")
+
+    print("[done]")
+
+
+if __name__ == "__main__":
+    main()
