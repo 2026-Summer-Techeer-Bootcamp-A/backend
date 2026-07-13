@@ -38,7 +38,8 @@ def client() -> Iterator[TestClient]:
         react = Skill(canonical="react", category="framework")
         aws = Skill(canonical="aws", category="cloud")
         user = User(email="feed@example.com", password_hash="unused")
-        seed.add_all([python, react, aws, user])
+        user_without_resume = User(email="noresume@example.com", password_hash="unused")
+        seed.add_all([python, react, aws, user, user_without_resume])
         seed.flush()
 
         resume = Resume(user_id=user.id, title="Resume", position="backend", pool="domestic")
@@ -59,6 +60,7 @@ def client() -> Iterator[TestClient]:
             title="p1 title",
             industry="IT서비스",
             region_city="서울",
+            region_district="강남구",
             post_date=today,
             close_date=today + timedelta(days=10),
             career_min=3,
@@ -173,3 +175,86 @@ def test_feed_pagination(client):
     assert body["total"] == 3
     assert len(body["items"]) == 1
     assert body["page"] == 2
+
+
+def test_feed_district_filter(client):
+    res = client.get("/api/v1/feed/postings", params={"district": "강남"})
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["title"] == "p1 title"
+
+    res = client.get("/api/v1/feed/postings", params={"district": "해운대"})
+    assert res.json()["total"] == 0
+
+
+def test_feed_deadline_within_days_filter(client):
+    # p1만 close_date(오늘+10일)를 가진다
+    res = client.get("/api/v1/feed/postings", params={"deadline_within_days": 15})
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["title"] == "p1 title"
+
+    res = client.get("/api/v1/feed/postings", params={"deadline_within_days": 5})
+    assert res.json()["total"] == 0
+
+
+def test_feed_min_match_filters_by_match_rate(client, monkeypatch):
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    from app.core.security import create_access_token
+
+    token = create_access_token(1)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 보유=[python, react]. p1=50%(python/aws), p2=100%(react), p3=0%(스킬 없음)
+    res = client.get("/api/v1/feed/postings", params={"min_match": 60}, headers=headers)
+    body = res.json()
+    assert res.status_code == 200
+    assert body["total"] == 1
+    assert body["items"][0]["title"] == "p2 title"
+    assert body["items"][0]["match"]["rate"] == 100.0
+
+    res = client.get("/api/v1/feed/postings", params={"min_match": 50}, headers=headers)
+    body = res.json()
+    assert body["total"] == 2
+    assert [i["title"] for i in body["items"]] == ["p1 title", "p2 title"]
+
+
+def test_feed_min_match_pagination_slices_after_filtering(client, monkeypatch):
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    from app.core.security import create_access_token
+
+    token = create_access_token(1)
+    res = client.get(
+        "/api/v1/feed/postings",
+        params={"min_match": 50, "page": 2, "page_size": 1},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    body = res.json()
+    assert body["total"] == 2
+    assert len(body["items"]) == 1
+    assert body["items"][0]["title"] == "p2 title"
+
+
+def test_feed_min_match_anonymous_rejected(client):
+    res = client.get("/api/v1/feed/postings", params={"min_match": 50})
+    assert res.status_code == 422
+
+
+def test_feed_min_match_without_resume_rejected(client, monkeypatch):
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    from app.core.security import create_access_token
+
+    token = create_access_token(2)  # noresume@example.com
+    res = client.get(
+        "/api/v1/feed/postings",
+        params={"min_match": 50},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 422
+
+
+def test_feed_min_match_range_validated(client):
+    res = client.get("/api/v1/feed/postings", params={"min_match": 101})
+    assert res.status_code == 422
+    res = client.get("/api/v1/feed/postings", params={"min_match": -1})
+    assert res.status_code == 422
