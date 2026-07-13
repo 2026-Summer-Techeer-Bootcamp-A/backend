@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base, get_session
 from app.core.security import create_access_token
 from app.main import app
-from app.models import Posting, PostingTech, Resume, ResumeSkill, Skill, User
+from app.models import Posting, PostingCategory, PostingTech, Resume, ResumeSkill, Skill, User
 
 
 @pytest.fixture
@@ -63,6 +63,17 @@ def client() -> Iterator[TestClient]:
 
         seed.add_all(
             [
+                PostingCategory(posting_id=p1.id, category="backend"),
+                PostingCategory(posting_id=p2.id, category="frontend"),
+                PostingCategory(posting_id=p3.id, category="backend"),
+                PostingCategory(posting_id=p4.id, category="backend"),
+                PostingCategory(posting_id=p5.id, category="frontend"),
+                PostingCategory(posting_id=p_global.id, category="backend"),
+            ]
+        )
+
+        seed.add_all(
+            [
                 PostingTech(posting_id=p1.id, skill_id=python.id),
                 PostingTech(posting_id=p2.id, skill_id=java.id),
                 PostingTech(posting_id=p3.id, skill_id=python.id),
@@ -104,9 +115,32 @@ def test_posting_timeline_totals_by_day(client: TestClient) -> None:
     assert "matched" not in by_date["2026-07-10"]
 
 
+def test_posting_timeline_supports_recent_365_days(client: TestClient) -> None:
+    resp = client.get("/api/v1/stats/posting-timeline", params={"pool": "domestic", "days": 365})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["daily"]) == 365
+    assert body["daily"][0]["date"] == "2025-07-11"
+    assert body["daily"][-1]["date"] == body["as_of"] == "2026-07-10"
+
+
 def test_posting_timeline_days_out_of_range_422(client: TestClient) -> None:
-    resp = client.get("/api/v1/stats/posting-timeline", params={"pool": "domestic", "days": 91})
+    resp = client.get("/api/v1/stats/posting-timeline", params={"pool": "domestic", "days": 366})
     assert resp.status_code == 422
+
+
+def test_posting_timeline_filters_by_position(client: TestClient) -> None:
+    resp = client.get(
+        "/api/v1/stats/posting-timeline",
+        params={"pool": "domestic", "days": 10, "position": "backend"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    by_date = {d["date"]: d for d in body["daily"]}
+    assert body["as_of"] == "2026-07-10"
+    assert by_date["2026-07-10"]["total"] == 1
+    assert by_date["2026-07-09"]["total"] == 1
+    assert by_date["2026-07-01"]["total"] == 1
 
 
 def test_posting_timeline_matched_with_resume(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
