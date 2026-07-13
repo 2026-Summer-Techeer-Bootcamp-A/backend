@@ -50,7 +50,7 @@ def semantic_search(
     facts = "; ".join(f"{it['name']} {it['metric']}" for it in items[:5])
     return {
         "tool_result": {"kind": "list", "label": "의미 유사 공고", "items": items},
-        "citation": {"type": "vector", "ref": "posting_embedding", "label": "BGE-M3 코사인 top-k"},
+        "citation": {"type": "vector", "ref": "채용공고 의미벡터", "label": "BGE-M3 코사인 top-k"},
         "n": len(rows),
         "facts": f"질문과 의미가 가까운 공고(코사인 유사도순) — {facts}",
     }
