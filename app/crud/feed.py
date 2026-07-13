@@ -99,6 +99,9 @@ def list_feed_postings(
                 categories=categories_map.get(p.id, []),
                 skills=[name for _, name in skills],
                 url=urls.get(p.id, ""),
+                career_min=p.career_min,
+                career_max=p.career_max,
+                response_rate=float(p.response_rate) if p.response_rate is not None else None,
                 match=_build_match(skills, owned_skill_ids),
             )
         )
