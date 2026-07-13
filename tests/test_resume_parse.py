@@ -128,6 +128,7 @@ def test_confirm_resume_stores_confirmed_input_in_session(
             "career_min": 3,
             "career_max": 5,
             "pool": "global",
+            "memo": None,
         },
         "ttl": 3600,
     }
@@ -425,10 +426,13 @@ def test_get_resume_returns_detail_for_owner(monkeypatch) -> None:
                 {"canonical": "Python", "category": "language", "in_dict": True},
                 {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
             ],
+            "certs": [],
             "position": "backend",
             "career_min": 3,
             "career_max": 5,
             "pool": "global",
+            "memo": None,
+            "is_primary": False,
         }
     finally:
         app.dependency_overrides.clear()
@@ -513,10 +517,13 @@ def test_update_resume_replaces_meta_and_skills_for_owner(monkeypatch) -> None:
                 {"canonical": "Kubernetes", "category": "devops", "in_dict": True},
                 {"canonical": "NewTool", "category": "unknown", "in_dict": False},
             ],
+            "certs": [],
             "position": "backend",
             "career_min": 4,
             "career_max": 6,
             "pool": "global",
+            "memo": None,
+            "is_primary": False,
         }
 
         with testing_session() as session:
@@ -617,8 +624,8 @@ def test_get_resume_list_returns_owned_active_resume_summaries(monkeypatch) -> N
         assert response.status_code == 200
         assert response.json() == {
             "items": [
-                {"resume_id": 2, "title": "Data resume", "position": "data"},
-                {"resume_id": 1, "title": "Backend resume v1", "position": "backend"},
+                {"resume_id": 2, "title": "Data resume", "position": "data", "is_primary": False},
+                {"resume_id": 1, "title": "Backend resume v1", "position": "backend", "is_primary": False},
             ]
         }
     finally:
