@@ -29,8 +29,9 @@ def test_split_posting_id_without_colon_raises():
 def test_derive_pool_domestic_and_global():
     assert derive_pool("jumpit") == "domestic"
     assert derive_pool("wanted") == "domestic"
+    assert derive_pool("jobkorea") == "domestic"
     assert derive_pool("himalayas") == "global"
-    assert DOMESTIC_SOURCES == {"wanted", "jumpit"}
+    assert DOMESTIC_SOURCES == {"wanted", "jumpit", "jobkorea"}
 
 
 def test_region_country_for():
