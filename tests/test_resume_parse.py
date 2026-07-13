@@ -325,10 +325,12 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
             nickname="resume-user",
         )
         python = Skill(canonical="Python", category="language")
-        seed.add_all([user, python])
+        aws_cert = Cert(name="AWS Certified Solutions Architect")
+        seed.add_all([user, python, aws_cert])
         seed.commit()
         user_id = user.id
         python_id = python.id
+        aws_cert_id = aws_cert.id
 
     def override_get_session() -> Iterator[Session]:
         with testing_session() as session:
@@ -348,6 +350,10 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
                     {"canonical": "Python", "category": "language", "in_dict": True},
                     {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
                 ],
+                "certs": [
+                    {"name": "AWS Certified Solutions Architect", "in_dict": True},
+                    {"name": "MysteryCert", "in_dict": False},
+                ],
                 "position": "backend",
                 "career_min": 3,
                 "career_max": 5,
@@ -358,6 +364,17 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
         assert response.status_code == 201
         assert response.json() == {"resume_id": 1}
 
+        detail_response = client.get(
+            "/api/v1/resume/1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail_response.status_code == 200
+        assert detail_response.json()["certs"] == [
+            {"name": "AWS Certified Solutions Architect", "in_dict": True},
+            {"name": "MysteryCert", "in_dict": False},
+        ]
+        assert detail_response.json()["is_primary"] is True
+
         with testing_session() as session:
             resume = session.get(Resume, 1)
             assert resume is not None
@@ -367,6 +384,8 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
             assert resume.career_min == 3
             assert resume.career_max == 5
             assert resume.pool == "global"
+            # 유저의 첫 이력서이므로 자동으로 기본 이력서가 되어야 한다.
+            assert resume.is_primary is True
 
             stored_skills = session.query(ResumeSkill).order_by(ResumeSkill.id).all()
             assert len(stored_skills) == 2
@@ -376,6 +395,15 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
             assert stored_skills[1].skill_id is None
             assert stored_skills[1].raw_label == "MysteryTool"
             assert stored_skills[1].is_out_of_dict is True
+
+            stored_certs = session.query(ResumeCert).order_by(ResumeCert.id).all()
+            assert len(stored_certs) == 2
+            assert stored_certs[0].cert_id == aws_cert_id
+            assert stored_certs[0].raw_label is None
+            assert stored_certs[0].is_out_of_dict is False
+            assert stored_certs[1].cert_id is None
+            assert stored_certs[1].raw_label == "MysteryCert"
+            assert stored_certs[1].is_out_of_dict is True
     finally:
         app.dependency_overrides.clear()
 
