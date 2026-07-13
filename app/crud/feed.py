@@ -191,6 +191,7 @@ def _build_feed_items(
                 certs=certs_map.get(p.id, []),
                 seniority=p.seniority_raw,
                 description_snippet=_build_description_snippet(p.description),
+                logo_url=p.logo_url,
                 url=urls.get(p.id, ""),
                 career_min=p.career_min,
                 career_max=p.career_max,
