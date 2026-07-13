@@ -82,6 +82,7 @@ def get_postings(
     ] = None,
     q: Annotated[str | None, Query(min_length=1, max_length=200, description="제목 또는 회사 검색어")] = None,
     skills: Annotated[str | None, Query(description="쉼표로 구분한 기술명(하나 이상 일치)")] = None,
+    industry: Annotated[str | None, Query(description="업종 부분일치(Posting.industry)")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
     authorization: Annotated[str | None, Header()] = None,
@@ -123,6 +124,7 @@ def get_postings(
         min_match=min_match,
         q=q,
         skills=[skill.strip() for skill in skills.split(",") if skill.strip()] if skills else None,
+        industry=industry,
     )
 
     return PostingListResponse(
