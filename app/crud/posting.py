@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import distinct, func, select
+from sqlalchemy import case, distinct, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
@@ -44,58 +44,27 @@ def list_posting_cards(
     district: str | None = None,
     deadline_within_days: int | None = None,
     min_match: float | None = None,
+    q: str | None = None,
+    skills: list[str] | None = None,
 ) -> tuple[list[dict], int]:
-    needs_owned_skills = (match_only or min_match is not None) and resume_id is not None and user_id is not None
-
-    if not needs_owned_skills:
-        # 매칭 필터가 없는 일반 조회는 DB 레벨에서 페이지를 자른다. 그래야 이
-        # 함수가 다루는 posting_id 수가 page_size(최대 100)를 넘지 않아,
-        # 필터에 걸리는 공고가 아무리 많아도 안전하다.
-        total = _count_filtered_postings(
-            session=session,
-            pool=pool,
-            position=position,
-            district=district,
-            deadline_within_days=deadline_within_days,
-        )
-        postings = _get_filtered_postings(
-            session=session,
-            pool=pool,
-            position=position,
-            sort=sort,
-            district=district,
-            deadline_within_days=deadline_within_days,
-            limit=page_size,
-            offset=(page - 1) * page_size,
-        )
-        posting_ids = [posting.id for posting in postings]
-        skill_map, _skill_id_map = _get_posting_skills(session, posting_ids)
-        url_map = _get_posting_urls(session, posting_ids)
-
-        cards = [
-            {
-                "id": posting.id,
-                "title": posting.title,
-                "company": posting.company,
-                "post_date": posting.post_date,
-                "close_date": posting.close_date,
-                "skills": skill_map.get(posting.id, []),
-                "url": url_map.get(posting.id, ""),
-            }
-            for posting in postings
-        ]
-        return cards, total
-
-    # 매칭 필터(match_only/min_match)는 페이지를 정하기 전에 이력서 보유 기술과의
-    # 겹침을 계산해야 해서, DB 레벨 LIMIT/OFFSET을 적용할 수 없다. 필터에 걸리는
-    # 공고 전체를 가져오지만, _get_posting_skills/_get_posting_urls가 내부적으로
-    # IN 절을 청크 처리하므로 건수가 아무리 많아도 안전하다.
-    owned_skill_ids = get_resume_skill_ids(
-        session,
-        resume_id=resume_id,
-        user_id=user_id,
+    owned_skill_ids = (
+        get_resume_skill_ids(session, resume_id=resume_id, user_id=user_id)
+        if resume_id is not None and user_id is not None
+        else None
     )
 
+    total = _count_filtered_postings(
+        session=session,
+        pool=pool,
+        position=position,
+        district=district,
+        deadline_within_days=deadline_within_days,
+        q=q,
+        skills=skills,
+        match_only=match_only,
+        min_match=min_match,
+        owned_skill_ids=owned_skill_ids,
+    )
     postings = _get_filtered_postings(
         session=session,
         pool=pool,
@@ -103,6 +72,13 @@ def list_posting_cards(
         sort=sort,
         district=district,
         deadline_within_days=deadline_within_days,
+        q=q,
+        skills=skills,
+        match_only=match_only,
+        min_match=min_match,
+        owned_skill_ids=owned_skill_ids,
+        limit=page_size,
+        offset=(page - 1) * page_size,
     )
     posting_ids = [posting.id for posting in postings]
     skill_map, skill_id_map = _get_posting_skills(session, posting_ids)
@@ -111,15 +87,6 @@ def list_posting_cards(
     cards = []
     for posting in postings:
         required_ids = skill_id_map.get(posting.id, set())
-        matched_count = len(required_ids & owned_skill_ids)
-
-        if match_only and matched_count < 1:
-            continue
-
-        if min_match is not None:
-            match_pct = (matched_count / len(required_ids) * 100) if required_ids else 0.0
-            if match_pct < min_match:
-                continue
 
         card = {
             "id": posting.id,
@@ -129,13 +96,12 @@ def list_posting_cards(
             "close_date": posting.close_date,
             "skills": skill_map.get(posting.id, []),
             "url": url_map.get(posting.id, ""),
-            "matched_count": matched_count,
         }
+        if owned_skill_ids is not None:
+            card["matched_count"] = len(required_ids & owned_skill_ids)
         cards.append(card)
 
-    total = len(cards)
-    offset = (page - 1) * page_size
-    return cards[offset : offset + page_size], total
+    return cards, total
 
 
 def get_posting_detail(session: Session, *, posting_id: int) -> dict:
@@ -180,6 +146,11 @@ def _apply_posting_filters(
     position: str | None,
     district: str | None,
     deadline_within_days: int | None,
+    q: str | None = None,
+    skills: list[str] | None = None,
+    match_only: bool = False,
+    min_match: float | None = None,
+    owned_skill_ids: set[int] | None = None,
 ):
     """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
     실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
@@ -188,10 +159,32 @@ def _apply_posting_filters(
     if pool is not None:
         stmt = stmt.where(Posting.pool == pool)
 
+    if q:
+        pattern = f"%{q.strip()}%"
+        stmt = stmt.where(or_(Posting.title.ilike(pattern), Posting.company.ilike(pattern)))
+
     if position is not None:
-        stmt = stmt.join(PostingCategory, PostingCategory.posting_id == Posting.id).where(
-            PostingCategory.category == position,
-            PostingCategory.is_deleted.is_(False),
+        stmt = stmt.where(
+            select(PostingCategory.id)
+            .where(
+                PostingCategory.posting_id == Posting.id,
+                PostingCategory.category == position,
+                PostingCategory.is_deleted.is_(False),
+            )
+            .exists()
+        )
+
+    if skills:
+        stmt = stmt.where(
+            select(PostingTech.id)
+            .join(Skill, Skill.id == PostingTech.skill_id)
+            .where(
+                PostingTech.posting_id == Posting.id,
+                PostingTech.is_deleted.is_(False),
+                Skill.is_deleted.is_(False),
+                Skill.canonical.in_(skills),
+            )
+            .exists()
         )
 
     if district is not None:
@@ -205,7 +198,43 @@ def _apply_posting_filters(
             Posting.close_date <= today + timedelta(days=deadline_within_days),
         )
 
+    if match_only or min_match is not None:
+        matched_count = _matched_skill_count(owned_skill_ids or set())
+        if match_only:
+            stmt = stmt.where(matched_count >= 1)
+        if min_match is not None:
+            required_count = _required_skill_count()
+            match_pct = case(
+                (required_count > 0, matched_count * 100.0 / required_count),
+                else_=0.0,
+            )
+            stmt = stmt.where(match_pct >= min_match)
+
     return stmt
+
+
+def _matched_skill_count(owned_skill_ids: set[int]):
+    if not owned_skill_ids:
+        return literal(0)
+    return (
+        select(func.count(distinct(PostingTech.skill_id)))
+        .where(
+            PostingTech.posting_id == Posting.id,
+            PostingTech.skill_id.in_(owned_skill_ids),
+            PostingTech.is_deleted.is_(False),
+        )
+        .correlate(Posting)
+        .scalar_subquery()
+    )
+
+
+def _required_skill_count():
+    return (
+        select(func.count(distinct(PostingTech.skill_id)))
+        .where(PostingTech.posting_id == Posting.id, PostingTech.is_deleted.is_(False))
+        .correlate(Posting)
+        .scalar_subquery()
+    )
 
 
 def _count_filtered_postings(
@@ -215,6 +244,11 @@ def _count_filtered_postings(
     position: str | None,
     district: str | None = None,
     deadline_within_days: int | None = None,
+    q: str | None = None,
+    skills: list[str] | None = None,
+    match_only: bool = False,
+    min_match: float | None = None,
+    owned_skill_ids: set[int] | None = None,
 ) -> int:
     stmt = _apply_posting_filters(
         select(func.count(distinct(Posting.id))),
@@ -222,6 +256,11 @@ def _count_filtered_postings(
         position=position,
         district=district,
         deadline_within_days=deadline_within_days,
+        q=q,
+        skills=skills,
+        match_only=match_only,
+        min_match=min_match,
+        owned_skill_ids=owned_skill_ids,
     )
     return session.execute(stmt).scalar_one()
 
@@ -236,6 +275,11 @@ def _get_filtered_postings(
     deadline_within_days: int | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    q: str | None = None,
+    skills: list[str] | None = None,
+    match_only: bool = False,
+    min_match: float | None = None,
+    owned_skill_ids: set[int] | None = None,
 ) -> list[Posting]:
     stmt = _apply_posting_filters(
         select(Posting),
@@ -243,9 +287,24 @@ def _get_filtered_postings(
         position=position,
         district=district,
         deadline_within_days=deadline_within_days,
+        q=q,
+        skills=skills,
+        match_only=match_only,
+        min_match=min_match,
+        owned_skill_ids=owned_skill_ids,
     )
 
-    if sort == "deadline":
+    if sort == "match" and owned_skill_ids is not None:
+        matched_count = _matched_skill_count(owned_skill_ids)
+        required_count = _required_skill_count()
+        match_pct = case(
+            (required_count > 0, matched_count * 100.0 / required_count),
+            else_=0.0,
+        )
+        stmt = stmt.order_by(
+            match_pct.desc(), Posting.post_date.is_(None), Posting.post_date.desc(), Posting.id.desc()
+        )
+    elif sort == "deadline":
         stmt = stmt.order_by(Posting.close_date.is_(None), Posting.close_date.asc(), Posting.id.asc())
     else:
         stmt = stmt.order_by(Posting.post_date.is_(None), Posting.post_date.desc(), Posting.id.desc())

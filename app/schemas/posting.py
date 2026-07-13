@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 
 Pool = Literal["global", "domestic"]
-PostingSort = Literal["latest", "deadline"]
+PostingSort = Literal["latest", "deadline", "match"]
 
 
 class PostingCardItem(BaseModel):
