@@ -344,7 +344,13 @@ def _get_posting_certs(session: Session, posting_id: int) -> list[str]:
 
 
 def _format_region(posting: Posting) -> str | None:
-    return posting.region_city or posting.region_district or posting.region_country
+    city, district = posting.region_city, posting.region_district
+    # region_city가 "서울"처럼 시/도 단위로만 있고 region_district(구/군)가 더 상세한 경우가
+    # 있다(예: wanted). district가 이미 city 문자열 안에 포함돼 있으면(jumpit 등 원래
+    # 상세 주소가 city에 통째로 들어있는 경우) 중복 표기하지 않는다.
+    if city and district and district not in city:
+        return f"{city} {district}"
+    return city or district or posting.region_country
 
 
 # Postgres는 한 쿼리에 바인딩할 수 있는 파라미터가 65,535개로 제한된다. 필터에
