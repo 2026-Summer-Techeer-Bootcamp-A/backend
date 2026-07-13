@@ -43,6 +43,7 @@ def generate_resume_feedback(
     position: str,
     session: Session,
     pool: str | None,
+    memo: str | None = None,
 ) -> ResumeFeedbackResponse:
     try:
         market_skills = _get_market_demand_skills(session=session, position=position, pool=pool)
@@ -50,6 +51,7 @@ def generate_resume_feedback(
             skills=skills,
             position=position,
             market_skills=market_skills,
+            memo=memo,
         )
         return ResumeFeedbackResponse(
             feedback=feedback,
@@ -89,6 +91,7 @@ def _generate_with_gemini(
     skills: list[dict[str, Any]],
     position: str,
     market_skills: list[str],
+    memo: str | None = None,
 ) -> tuple[list[str], list[str]]:
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
@@ -104,6 +107,7 @@ def _generate_with_gemini(
                             skills=skills,
                             position=position,
                             market_skills=market_skills,
+                            memo=memo,
                         )
                     }
                 ],
@@ -147,27 +151,31 @@ def _build_prompt(
     skills: list[dict[str, Any]],
     position: str,
     market_skills: list[str],
+    memo: str | None = None,
 ) -> str:
     skill_names = [str(skill.get("canonical", "")).strip() for skill in skills]
     skill_names = [skill for skill in skill_names if skill]
-    return json.dumps(
-        {
-            "task": "확정된 이력서 스킬셋을 기준으로, 엄격한 면접관 관점의 개선 피드백과 예상 면접 질문을 생성하세요.",
-            "position": position,
-            "skills": skill_names,
-            "현재 채용 시장 수요 스킬": market_skills,
-            "requirements": [
-                "feedback는 2~4개, questions는 4~5개를 작성하세요.",
-                "각 문장은 한국어로 작성하세요.",
-                "questions는 지원자의 보유 스킬 중 최소 1개, '현재 채용 시장 수요 스킬' 중 지원자가 갖추지 못한 스킬 중 최소 1개와 연결되어야 합니다.",
-                "표면적인 용어 나열이 아니라 트레이드오프, 실패 사례, 프로덕션 운영 경험을 파고드는 질문으로 작성하세요.",
-                "스킬셋에 없는 경험을 단정하지 말고, 이력서에 드러나면 좋은 보완점으로 표현하세요.",
-                "응답은 JSON 객체만 반환하세요.",
-            ],
-            "schema": {"feedback": ["string"], "questions": ["string"]},
-        },
-        ensure_ascii=False,
-    )
+    payload: dict[str, Any] = {
+        "task": "확정된 이력서 스킬셋을 기준으로, 엄격한 면접관 관점의 개선 피드백과 예상 면접 질문을 생성하세요.",
+        "position": position,
+        "skills": skill_names,
+        "현재 채용 시장 수요 스킬": market_skills,
+        "requirements": [
+            "feedback는 2~4개, questions는 4~5개를 작성하세요.",
+            "각 문장은 한국어로 작성하세요.",
+            "questions는 지원자의 보유 스킬 중 최소 1개, '현재 채용 시장 수요 스킬' 중 지원자가 갖추지 못한 스킬 중 최소 1개와 연결되어야 합니다.",
+            "표면적인 용어 나열이 아니라 트레이드오프, 실패 사례, 프로덕션 운영 경험을 파고드는 질문으로 작성하세요.",
+            "스킬셋에 없는 경험을 단정하지 말고, 이력서에 드러나면 좋은 보완점으로 표현하세요.",
+            "응답은 JSON 객체만 반환하세요.",
+        ],
+        "schema": {"feedback": ["string"], "questions": ["string"]},
+    }
+    if memo:
+        payload["지원자 메모"] = memo
+        payload["requirements"].append(
+            "지원자 메모에 적힌 맥락(프로젝트 경험, 목표 등)이 있다면 피드백과 질문에 반영하세요."
+        )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _extract_text(response_body: dict[str, Any]) -> str:
