@@ -176,7 +176,7 @@ def test_resume_feedback_uses_confirmed_session_without_auth(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "app.routers.resume.generate_resume_feedback",
-        lambda *, skills, position: {
+        lambda *, skills, position, session, pool, memo=None: {
             "feedback": ["Docker 경험을 프로젝트 설명에 보강해보세요."],
             "questions": ["Python을 선택한 이유를 설명해주세요."],
             "model": "primary",
@@ -218,12 +218,21 @@ def test_resume_feedback_falls_back_when_gemini_is_unavailable(monkeypatch) -> N
 
     monkeypatch.setattr(resume_feedback.settings, "gemini_api_key", None)
 
-    response = resume_feedback.generate_resume_feedback(
-        skills=[
-            {"canonical": "Python", "category": "language", "in_dict": True},
-        ],
-        position="backend",
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        response = resume_feedback.generate_resume_feedback(
+            skills=[
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            position="backend",
+            session=session,
+            pool=None,
+        )
 
     assert response.degraded is True
     assert response.model == "fallback"
@@ -1076,3 +1085,33 @@ def test_delete_primary_resume_promotes_most_recently_updated_remaining(monkeypa
             assert remaining.is_primary is True
     finally:
         app.dependency_overrides.clear()
+
+
+def test_generate_resume_feedback_includes_memo_in_prompt(monkeypatch) -> None:
+    from app.services import resume_feedback
+
+    captured_prompts = []
+
+    def fake_generate_with_gemini(*, skills, position, market_skills, memo=None):
+        captured_prompts.append(
+            resume_feedback._build_prompt(
+                skills=skills, position=position, market_skills=market_skills, memo=memo
+            )
+        )
+        return (["feedback"], ["question"])
+
+    monkeypatch.setattr(resume_feedback, "_generate_with_gemini", fake_generate_with_gemini)
+    monkeypatch.setattr(resume_feedback, "_get_market_demand_skills", lambda **kwargs: ["Docker"])
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        resume_feedback.generate_resume_feedback(
+            skills=[{"canonical": "Python", "category": "language", "in_dict": True}],
+            position="backend",
+            session=session,
+            pool="domestic",
+            memo="3년차 백엔드, 대용량 트래픽 프로젝트 경험 위주로 봐주세요.",
+        )
+
+    assert "3년차 백엔드" in captured_prompts[0]
