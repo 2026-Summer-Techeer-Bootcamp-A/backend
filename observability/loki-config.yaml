@@ -24,3 +24,12 @@ schema_config:
       index:
         prefix: index_
         period: 24h
+
+limits_config:
+  # 컨테이너 로그 수집(loki.source.docker)이 재시작 시 기존 컨테이너의 쌓인
+  # 로그를 한꺼번에 밀어넣을 수 있어, 기본 한도로는 429(rate limit)와 400
+  # (too old)로 버려지는 문제가 있었다. 소규모 단일 프로젝트라 넉넉하게 잡는다.
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
