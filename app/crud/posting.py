@@ -47,6 +47,7 @@ def list_posting_cards(
     min_match: float | None = None,
     q: str | None = None,
     skills: list[str] | None = None,
+    industry: str | None = None,
 ) -> tuple[list[dict], int]:
     owned_skill_ids = (
         get_resume_skill_ids(session, resume_id=resume_id, user_id=user_id)
@@ -62,6 +63,7 @@ def list_posting_cards(
         deadline_within_days=deadline_within_days,
         q=q,
         skills=skills,
+        industry=industry,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
@@ -75,6 +77,7 @@ def list_posting_cards(
         deadline_within_days=deadline_within_days,
         q=q,
         skills=skills,
+        industry=industry,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
@@ -152,6 +155,7 @@ def _apply_posting_filters(
     deadline_within_days: int | None,
     q: str | None = None,
     skills: list[str] | None = None,
+    industry: str | None = None,
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
@@ -195,6 +199,9 @@ def _apply_posting_filters(
 
     if district is not None:
         stmt = stmt.where(Posting.region_district.ilike(f"%{district}%"))
+
+    if industry is not None:
+        stmt = stmt.where(Posting.industry.ilike(f"%{industry}%"))
 
     if deadline_within_days is not None:
         today = date.today()
@@ -252,6 +259,7 @@ def _count_filtered_postings(
     deadline_within_days: int | None = None,
     q: str | None = None,
     skills: list[str] | None = None,
+    industry: str | None = None,
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
@@ -264,6 +272,7 @@ def _count_filtered_postings(
         deadline_within_days=deadline_within_days,
         q=q,
         skills=skills,
+        industry=industry,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
@@ -283,6 +292,7 @@ def _get_filtered_postings(
     offset: int | None = None,
     q: str | None = None,
     skills: list[str] | None = None,
+    industry: str | None = None,
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
@@ -295,6 +305,7 @@ def _get_filtered_postings(
         deadline_within_days=deadline_within_days,
         q=q,
         skills=skills,
+        industry=industry,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
