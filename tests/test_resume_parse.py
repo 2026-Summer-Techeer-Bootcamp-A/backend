@@ -922,3 +922,36 @@ def test_create_resume_rejects_invalid_pool(monkeypatch) -> None:
         assert response.status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+def test_resume_primary_unique_index_rejects_second_primary_per_user() -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as session:
+        user = User(email="primary@example.com", password_hash="unused")
+        session.add(user)
+        session.flush()
+        session.add(
+            Resume(
+                user_id=user.id, title="A", position="backend",
+                career_min=0, career_max=1, pool="domestic", is_primary=True,
+            )
+        )
+        session.commit()
+
+        session.add(
+            Resume(
+                user_id=user.id, title="B", position="backend",
+                career_min=0, career_max=1, pool="domestic", is_primary=True,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
