@@ -152,8 +152,9 @@ def test_feed_anonymous_returns_cards_without_match(client):
     assert sorted(first["concepts"]) == ["CI/CD", "MSA"]
     assert first["certs"] == ["정보처리기사"]
     assert first["seniority"] == "시니어"
+    # 줄바꿈은 보존되고(불릿 구조 유지), 줄 내부의 연속 공백만 정리된다.
     assert first["description_snippet"] == (
-        "Python, Django 백엔드 개발자를 모집합니다. 우대사항: MSA 경험"
+        "Python, Django 백엔드 개발자를\n모집합니다.\n우대사항: MSA 경험"
     )
     assert first["match"] is None
     assert first["career_min"] == 3
@@ -315,7 +316,8 @@ def test_build_description_snippet_edge_cases():
     assert _build_description_snippet(json.dumps([{"title": "소개"}])) is None  # text 없음
     assert _build_description_snippet(json.dumps([{"title": "소개", "text": "   "}])) is None
 
-    # 첫 섹션이 짧으면 다음 섹션까지 이어붙여 스니펫을 채운다 + 공백 정리
+    # 첫 섹션이 짧으면 다음 섹션까지 이어붙여 스니펫을 채운다.
+    # 줄 내부의 연속 공백/탭은 정리되지만 줄바꿈 자체는 보존되어 섹션은 "\n"으로 이어진다.
     short_sections = json.dumps(
         [
             {"title": "소개", "text": "짧은 소개\n   문구입니다."},
@@ -323,7 +325,18 @@ def test_build_description_snippet_edge_cases():
         ],
         ensure_ascii=False,
     )
-    assert _build_description_snippet(short_sections) == "짧은 소개 문구입니다. 업무 내용입니다."
+    assert _build_description_snippet(short_sections) == "짧은 소개\n문구입니다.\n업무 내용입니다."
+
+    # 불릿마다 줄바꿈이 있는 실제 포맷: 개행이 유지되어 불릿 구조가 살아 있어야 한다.
+    bulleted = json.dumps(
+        [{"title": "주요 업무", "text": "• 항목1\n• 항목2\n• 항목3"}],
+        ensure_ascii=False,
+    )
+    assert _build_description_snippet(bulleted) == "• 항목1\n• 항목2\n• 항목3"
+
+    # 한 줄 내부의 연속 공백/탭만 하나로 정리된다 (줄바꿈과는 별개)
+    inline_whitespace = json.dumps([{"title": "소개", "text": "a   b\tc"}], ensure_ascii=False)
+    assert _build_description_snippet(inline_whitespace) == "a b c"
 
     # 첫 섹션이 충분히 길면 두 번째 섹션은 합치지 않는다
     long_first = "가" * 100
