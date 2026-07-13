@@ -185,14 +185,21 @@ def stats_cooccurrence(
 def stats_posting_timeline(
     session: SessionDep,
     pool: Annotated[Pool, Query(description="global 또는 domestic")],
-    days: Annotated[int, Query(ge=1, le=90, description="집계 일수")] = 36,
+    days: Annotated[int, Query(ge=1, le=365, description="집계 일수")] = 36,
+    position: Annotated[str | None, Query(description="직무 카테고리")] = None,
     resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
     session_id: Annotated[str | None, Query(description="비로그인 분석 세션 ID")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> PostingTimelineResponse:
     """최신 공고 일별 타임라인. resume_id/session_id 지정 시 보유기술과 1개 이상 겹치는 공고 수도 반환."""
     owned_skill_ids = resolve_optional_owned_skill_ids(session, resume_id, session_id, authorization)
-    daily, as_of = get_posting_timeline(session=session, pool=pool, days=days, owned_skill_ids=owned_skill_ids)
+    daily, as_of = get_posting_timeline(
+        session=session,
+        pool=pool,
+        days=days,
+        owned_skill_ids=owned_skill_ids,
+        position=position,
+    )
     return PostingTimelineResponse(daily=daily, as_of=as_of)
 
 
