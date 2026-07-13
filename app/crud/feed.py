@@ -1,3 +1,4 @@
+import json
 import re
 
 from sqlalchemy import select
@@ -11,13 +12,13 @@ from app.crud.posting import (
 )
 from app.models.cert import Cert
 from app.models.concept import Concept
-from app.models.posting import Posting, PostingCategory, PostingCert, PostingConcept, PostingTech, RawPosting
+from app.models.posting import Posting, PostingCategory, PostingCert, PostingConcept, PostingTech
 from app.models.skill import Skill
 from app.schemas.feed import FeedMatch, FeedPostingItem
 
-_DESCRIPTION_SNIPPET_KEYS = ("description", "description_ko", "body", "content", "intro")
 _DESCRIPTION_SNIPPET_MAX_LEN = 300
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# 첫 섹션 텍스트가 이 길이보다 짧으면 다음 섹션도 이어붙여 스니펫을 채운다.
+_SHORT_SECTION_THRESHOLD = 80
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -96,35 +97,47 @@ def _get_feed_certs(session: Session, posting_ids: list[int]) -> dict[int, list[
     return out
 
 
-def _extract_description_snippet(payload: dict | None) -> str | None:
-    if not payload:
+def _build_description_snippet(description: str | None) -> str | None:
+    """Posting.description(JSON 섹션 문자열)에서 피드 카드용 요약 스니펫을 뽑는다.
+
+    형식은 get_posting_detail의 desc_sections 파싱과 동일하다:
+    `[{"title": .., "text": ..}, ...]`. 값이 없거나 JSON 파싱이 실패하거나
+    기대한 형태가 아니면 피드 응답 전체가 죽지 않도록 None을 반환한다.
+    """
+    if not description:
         return None
-    for key in _DESCRIPTION_SNIPPET_KEYS:
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            text = _HTML_TAG_RE.sub(" ", value)
-            text = _WHITESPACE_RE.sub(" ", text).strip()
-            return text[:_DESCRIPTION_SNIPPET_MAX_LEN] if text else None
-    return None
+    try:
+        sections = json.loads(description)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(sections, list) or not sections:
+        return None
 
+    parts: list[str] = []
+    collected_len = 0
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        text = section.get("text")
+        if not isinstance(text, str):
+            continue
+        cleaned = _WHITESPACE_RE.sub(" ", text).strip()
+        if not cleaned:
+            continue
+        parts.append(cleaned)
+        collected_len += len(cleaned)
+        # 첫 섹션이 짧으면(예: 한두 문장짜리 "소개") 다음 섹션까지 이어붙여
+        # 스니펫이 너무 빈약해지지 않게 한다. 최대 두 섹션까지만 합친다.
+        if collected_len >= _SHORT_SECTION_THRESHOLD or len(parts) >= 2:
+            break
 
-def _get_feed_description_snippets(session: Session, posting_ids: list[int]) -> dict[int, str | None]:
-    """posting_id -> 최신 RawPosting.payload에서 뽑은 설명 스니펫 (없으면 None)."""
-    if not posting_ids:
-        return {}
-    rows = session.execute(
-        select(RawPosting.posting_id, RawPosting.payload, RawPosting.captured_at)
-        .where(
-            RawPosting.posting_id.in_(posting_ids),
-            RawPosting.is_deleted.is_(False),
-        )
-        .order_by(RawPosting.captured_at.desc())
-    ).all()
-    out: dict[int, str | None] = {}
-    for posting_id, payload, _captured_at in rows:
-        if posting_id not in out:
-            out[posting_id] = _extract_description_snippet(payload)
-    return out
+    if not parts:
+        return None
+
+    snippet = " ".join(parts)
+    if len(snippet) > _DESCRIPTION_SNIPPET_MAX_LEN:
+        snippet = snippet[:_DESCRIPTION_SNIPPET_MAX_LEN].rstrip() + "…"
+    return snippet
 
 
 def _build_match(
@@ -148,7 +161,6 @@ def _build_feed_items(
     categories_map = _get_feed_categories(session, ids)
     concepts_map = _get_feed_concepts(session, ids)
     certs_map = _get_feed_certs(session, ids)
-    snippets_map = _get_feed_description_snippets(session, ids)
     urls = _get_posting_urls(session, ids)
 
     items: list[FeedPostingItem] = []
@@ -169,7 +181,7 @@ def _build_feed_items(
                 concepts=concepts_map.get(p.id, []),
                 certs=certs_map.get(p.id, []),
                 seniority=p.seniority_raw,
-                description_snippet=snippets_map.get(p.id),
+                description_snippet=_build_description_snippet(p.description),
                 url=urls.get(p.id, ""),
                 career_min=p.career_min,
                 career_max=p.career_max,
