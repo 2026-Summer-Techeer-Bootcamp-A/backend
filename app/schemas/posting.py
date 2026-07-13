@@ -16,6 +16,7 @@ class PostingCardItem(BaseModel):
     close_date: date | None
     skills: list[str]
     url: str
+    logo_url: str | None = None
     matched_count: int | None = None
 
 
@@ -41,6 +42,11 @@ class SimilarPostingsResponse(BaseModel):
     as_of: str
 
 
+class DescSection(BaseModel):
+    title: str
+    text: str
+
+
 class PostingDetailResponse(BaseModel):
     id: int
     source: str
@@ -60,3 +66,5 @@ class PostingDetailResponse(BaseModel):
     skills: list[str]
     certs: list[str]
     url: str
+    logo_url: str | None = None
+    desc_sections: list[DescSection] = []
