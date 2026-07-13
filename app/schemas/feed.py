@@ -20,6 +20,10 @@ class FeedPostingItem(BaseModel):
     close_date: date | None
     categories: list[str]
     skills: list[str]
+    concepts: list[str]
+    certs: list[str]
+    seniority: str | None
+    description_snippet: str | None
     url: str
     career_min: int | None
     career_max: int | None
