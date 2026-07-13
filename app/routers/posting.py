@@ -70,7 +70,7 @@ def get_postings(
     session: SessionDep,
     pool: Annotated[Pool | None, Query(description="global 또는 domestic")] = None,
     position: Annotated[str | None, Query(description="직무 필터")] = None,
-    sort: Annotated[PostingSort, Query(description="latest 또는 deadline")] = "latest",
+    sort: Annotated[PostingSort, Query(description="latest, deadline 또는 match")] = "latest",
     match_only: Annotated[bool, Query(description="이력서와 매칭되는 공고만 조회")] = False,
     resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
     district: Annotated[str | None, Query(description="지역(구/동) 필터. region_district 부분일치")] = None,
@@ -105,6 +105,12 @@ def get_postings(
                 detail="Could not validate credentials",
             )
         user_id = current_user.id
+    elif sort == "match" and resume_id is not None:
+        # sort=match는 이력서/인증 컨텍스트가 없으면 의미가 없으니, match_only/min_match와
+        # 달리 401로 막지 않고 user_id를 None으로 둬 crud 쪽에서 최신순으로 폴백한다.
+        current_user = get_user_from_optional_authorization(session, authorization)
+        if current_user is not None:
+            user_id = current_user.id
 
     items, total = list_posting_cards(
         session,

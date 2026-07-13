@@ -215,6 +215,7 @@ def test_get_posting_detail_returns_full_posting(client: TestClient) -> None:
         "skills": ["Python", "Spring"],
         "certs": ["AWS SAA"],
         "url": "https://example.com/wanted-1",
+        "desc_sections": [],
     }
 
 

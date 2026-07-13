@@ -139,7 +139,7 @@ def test_feed_anonymous_returns_cards_without_match(client):
     first = body["items"][0]
     assert first["title"] == "p1 title"  # post_date 내림차순
     assert first["industry"] == "IT서비스"
-    assert first["region"] == "서울"
+    assert first["region"] == "서울 강남구"
     assert first["categories"] == ["백엔드"]
     assert sorted(first["skills"]) == ["aws", "python"]
     assert sorted(first["concepts"]) == ["CI/CD", "MSA"]

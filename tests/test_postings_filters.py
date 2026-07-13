@@ -114,3 +114,29 @@ def test_min_match_filters_by_coverage_ratio(client: TestClient, monkeypatch: py
     # Toss(100%)만 60% 이상. Woowa(50%), Kakao(0%)는 제외.
     assert companies == {"Toss"}
     assert resp.json()["items"][0]["matched_count"] == 1
+
+
+def test_sort_match_orders_by_matched_count_desc(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    resp = client.get(
+        "/api/v1/postings",
+        params={"pool": "domestic", "resume_id": client.resume_id, "sort": "match"},
+        headers={"Authorization": f"Bearer {client.token}"},
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    matched_counts = [item["matched_count"] for item in items]
+    # Toss(1/1), Woowa(1/2)가 matched_count=1로 Kakao(0/1)보다 앞에 와야 한다.
+    assert matched_counts == sorted(matched_counts, reverse=True)
+    assert {item["company"] for item in items[:2]} == {"Toss", "Woowa"}
+    assert items[-1]["company"] == "Kakao"
+    assert items[-1]["matched_count"] == 0
+
+
+def test_sort_match_without_resume_context_falls_back_to_latest(client: TestClient) -> None:
+    # resume_id/인증이 없으면 sort=match는 422 없이 최신순으로 안전하게 폴백한다.
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "sort": "match"})
+    assert resp.status_code == 200
+    companies = {item["company"] for item in resp.json()["items"]}
+    assert companies == {"Toss", "Woowa", "Kakao"}
+    assert all(item.get("matched_count") is None for item in resp.json()["items"])
