@@ -26,6 +26,8 @@ from app.routers.github_insight import router as github_insight_router
 from app.routers.admin import router as admin_router
 from app.routers.search import router as search_router
 from app.routers.chat import router as chat_router
+from app.routers.news import router as news_router
+from app.routers.feed import router as feed_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -137,6 +139,8 @@ app.include_router(github_insight_router, prefix="/api/v1", tags=["github-insigh
 app.include_router(admin_router, prefix="/api/v1", tags=["admin"])
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
 app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
+app.include_router(news_router, prefix="/api/v1", tags=["news"])
+app.include_router(feed_router, prefix="/api/v1", tags=["feed"])
 
 
 class PersonOut(BaseModel):
