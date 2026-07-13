@@ -14,7 +14,7 @@ from app.core.security import create_access_token
 from app.main import app
 from app.models import Posting, PostingTech, Resume, ResumeSkill, Skill, User
 
-TODAY = date(2026, 7, 10)
+TODAY = date.today()
 
 
 @pytest.fixture
@@ -40,6 +40,7 @@ def client() -> Iterator[TestClient]:
             source="jumpit", source_uid="j1", pool="domestic", company="Toss",
             title="Backend Engineer", post_date=date(2026, 7, 1),
             close_date=TODAY + timedelta(days=3), region_district="강남구",
+            industry="금융IT/핀테크",
         )
         gangnam_far = Posting(
             source="jumpit", source_uid="j2", pool="domestic", company="Woowa",
@@ -95,6 +96,20 @@ def test_deadline_within_days_filter(client: TestClient) -> None:
     assert resp.status_code == 200
     companies = {item["company"] for item in resp.json()["items"]}
     assert companies == {"Toss", "Kakao"}
+
+
+def test_industry_filter(client: TestClient) -> None:
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "industry": "핀테크"})
+    assert resp.status_code == 200
+    companies = {item["company"] for item in resp.json()["items"]}
+    assert companies == {"Toss"}
+
+
+def test_skills_filter_matches_any(client: TestClient) -> None:
+    resp = client.get("/api/v1/postings", params={"pool": "domestic", "skills": "Spring"})
+    assert resp.status_code == 200
+    companies = {item["company"] for item in resp.json()["items"]}
+    assert companies == {"Woowa", "Kakao"}
 
 
 def test_min_match_requires_resume_id(client: TestClient) -> None:
