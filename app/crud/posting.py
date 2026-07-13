@@ -7,6 +7,7 @@ from sqlalchemy import case, distinct, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
+from app.services.posting_description import normalize_jobkorea_sections
 
 
 def get_resume_skill_ids(session: Session, *, resume_id: int, user_id: int) -> set[int]:
@@ -118,6 +119,12 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
 
     skill_map, _skill_id_map = _get_posting_skills(session, [posting.id])
     url_map = _get_posting_urls(session, [posting.id])
+    desc_sections = json.loads(posting.description) if posting.description else []
+    if posting.source == "jobkorea":
+        desc_sections = normalize_jobkorea_sections(
+            desc_sections,
+            posting_title=posting.title,
+        )
 
     return {
         "id": posting.id,
@@ -139,7 +146,7 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
         "certs": _get_posting_certs(session, posting.id),
         "url": url_map.get(posting.id, ""),
         "logo_url": posting.logo_url,
-        "desc_sections": json.loads(posting.description) if posting.description else [],
+        "desc_sections": desc_sections,
     }
 
 
