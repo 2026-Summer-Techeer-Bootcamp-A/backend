@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,11 @@ def read_feed_postings(
     session: SessionDep,
     pool: Annotated[Pool | None, Query()] = None,
     category: Annotated[str | None, Query(description="job_category name")] = None,
+    district: Annotated[str | None, Query(description="region_district 부분 일치")] = None,
+    deadline_within_days: Annotated[int | None, Query(ge=1)] = None,
+    min_match: Annotated[
+        int | None, Query(ge=0, le=100, description="최소 매치율(%). 로그인 + 이력서 필요")
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
     authorization: Annotated[str | None, Header()] = None,
@@ -49,6 +54,12 @@ def read_feed_postings(
     owned_skill_ids = (
         _resolve_owned_skill_ids_for_user(session, user) if user is not None else None
     )
+    if min_match is not None and owned_skill_ids is None:
+        # 매치율 필터는 이력서 스킬셋 없이는 계산할 수 없다.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="min_match requires an authenticated user with a resume",
+        )
     items, total = list_feed_postings(
         session=session,
         pool=pool,
@@ -56,6 +67,9 @@ def read_feed_postings(
         page=page,
         page_size=page_size,
         owned_skill_ids=owned_skill_ids,
+        district=district,
+        deadline_within_days=deadline_within_days,
+        min_match=min_match,
     )
     return FeedResponse(
         items=items,

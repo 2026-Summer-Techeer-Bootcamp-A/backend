@@ -7,7 +7,7 @@ from app.crud.posting import (
     _get_filtered_postings,
     _get_posting_urls,
 )
-from app.models.posting import PostingCategory, PostingTech
+from app.models.posting import Posting, PostingCategory, PostingTech
 from app.models.skill import Skill
 from app.schemas.feed import FeedMatch, FeedPostingItem
 
@@ -60,24 +60,11 @@ def _build_match(
     return FeedMatch(rate=rate, owned_skills=owned, missing_skills=missing)
 
 
-def list_feed_postings(
-    *,
+def _build_feed_items(
     session: Session,
-    pool: str | None,
-    category: str | None,
-    page: int,
-    page_size: int,
+    postings: list[Posting],
     owned_skill_ids: set[int] | None,
-) -> tuple[list[FeedPostingItem], int]:
-    total = _count_filtered_postings(session=session, pool=pool, position=category)
-    postings = _get_filtered_postings(
-        session=session,
-        pool=pool,
-        position=category,
-        sort="latest",
-        limit=page_size,
-        offset=(page - 1) * page_size,
-    )
+) -> list[FeedPostingItem]:
     ids = [p.id for p in postings]
     skills_map = _get_feed_skills(session, ids)
     categories_map = _get_feed_categories(session, ids)
@@ -105,4 +92,58 @@ def list_feed_postings(
                 match=_build_match(skills, owned_skill_ids),
             )
         )
-    return items, total
+    return items
+
+
+def list_feed_postings(
+    *,
+    session: Session,
+    pool: str | None,
+    category: str | None,
+    page: int,
+    page_size: int,
+    owned_skill_ids: set[int] | None,
+    district: str | None = None,
+    deadline_within_days: int | None = None,
+    min_match: int | None = None,
+) -> tuple[list[FeedPostingItem], int]:
+    if min_match is None:
+        total = _count_filtered_postings(
+            session=session,
+            pool=pool,
+            position=category,
+            district=district,
+            deadline_within_days=deadline_within_days,
+        )
+        postings = _get_filtered_postings(
+            session=session,
+            pool=pool,
+            position=category,
+            sort="latest",
+            district=district,
+            deadline_within_days=deadline_within_days,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
+        return _build_feed_items(session, postings, owned_skill_ids), total
+
+    # min_match는 페이지를 정하기 전에 매치율을 계산해야 하므로 DB 레벨
+    # LIMIT/OFFSET을 쓸 수 없다. 필터된 공고 전체를 가져와 매치율로 거른 뒤
+    # 파이썬에서 페이지를 자른다. (list_posting_cards의 min_match 분기와 동일 방식)
+    postings = _get_filtered_postings(
+        session=session,
+        pool=pool,
+        position=category,
+        sort="latest",
+        district=district,
+        deadline_within_days=deadline_within_days,
+    )
+    items = _build_feed_items(session, postings, owned_skill_ids)
+    filtered = [
+        item
+        for item in items
+        if (item.match.rate if item.match is not None else 0.0) >= min_match
+    ]
+    total = len(filtered)
+    offset = (page - 1) * page_size
+    return filtered[offset : offset + page_size], total
