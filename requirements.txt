@@ -14,3 +14,6 @@ PyJWT
 redis
 email-validator
 requests
+
+# RAG vector_tool 쿼리 임베딩(BGE-M3 CPU/onnx). enable_vector_search 플래그로 게이팅.
+fastembed>=0.4,<0.8

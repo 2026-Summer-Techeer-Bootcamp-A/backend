@@ -19,7 +19,7 @@ from app.services.rag.schemas import (
     ToolResult,
 )
 from app.services.rag.synthesis import synthesize
-from app.services.rag.tools import graph_tool, sql_tool
+from app.services.rag.tools import graph_tool, sql_tool, vector_tool
 
 
 def _confidence_level(n: int) -> int:
@@ -42,6 +42,10 @@ def _dispatch(session: Session, p: Plan) -> list[dict]:
 
     if p.intent == "cooccurrence" and skill:
         r = graph_tool.co_occurring_skills(session, skill, pool)
+        if r:
+            out.append(r)
+    elif p.intent == "semantic_search":
+        r = vector_tool.semantic_search(session, p.subqueries[0] if p.subqueries else "", pool)
         if r:
             out.append(r)
     elif p.intent == "skill_demand" and skill:
