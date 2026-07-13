@@ -63,7 +63,10 @@ def get_user_resumes(
     response_model=ResumeFeedbackResponse,
     status_code=status.HTTP_200_OK,
 )
-def create_resume_feedback(payload: ResumeFeedbackRequest) -> ResumeFeedbackResponse:
+def create_resume_feedback(
+    payload: ResumeFeedbackRequest,
+    session: SessionDep,
+) -> ResumeFeedbackResponse:
     confirmed = get_resume_confirm_session(payload.session_id)
     if confirmed is None or not confirmed.get("skills"):
         raise HTTPException(
@@ -74,6 +77,8 @@ def create_resume_feedback(payload: ResumeFeedbackRequest) -> ResumeFeedbackResp
     return generate_resume_feedback(
         skills=confirmed["skills"],
         position=payload.position,
+        session=session,
+        pool=confirmed.get("pool"),
     )
 
 

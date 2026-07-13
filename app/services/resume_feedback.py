@@ -1,12 +1,30 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.error
 import urllib.request
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.crud.insight import get_skill_share
 from app.schemas.resume import ResumeFeedbackResponse
+
+logger = logging.getLogger(__name__)
+
+STRICT_INTERVIEWER_SYSTEM_INSTRUCTION = (
+    "당신은 매우 엄격한 한국 IT 기업의 시니어 기술 면접관입니다. "
+    "지원자의 스킬셋 깊이, 기술적 트레이드오프 이해도, 장애/실패 상황 대응 경험, "
+    "실제 프로덕션 운영 경험을 집요하게 검증합니다. "
+    "'써봤다', '사용 경험 있다' 수준의 표면적 답변이나 유행어 나열은 절대 인정하지 않고, "
+    "구체적인 수치, 의사결정 근거, 대안 비교, 실패와 복구 경험을 요구하세요. "
+    "질문은 지원자가 실제로 보유한 스킬과, 현재 채용 시장에서 요구되지만 "
+    "지원자에게 부족한 스킬(시장 수요 격차) 두 가지 모두와 연결되어야 합니다. "
+    "응답은 반드시 다음 스키마의 유효한 JSON 객체 하나만 반환하세요. "
+    '다른 설명, 마크다운, 코드블록 없이 {"feedback": ["..."], "questions": ["..."]} 형식만 출력하세요.'
+)
 
 
 MARKET_SKILLS_BY_POSITION: dict[str, tuple[str, ...]] = {
@@ -23,16 +41,24 @@ def generate_resume_feedback(
     *,
     skills: list[dict[str, Any]],
     position: str,
+    session: Session,
+    pool: str | None,
 ) -> ResumeFeedbackResponse:
     try:
-        feedback, questions = _generate_with_gemini(skills=skills, position=position)
+        market_skills = _get_market_demand_skills(session=session, position=position, pool=pool)
+        feedback, questions = _generate_with_gemini(
+            skills=skills,
+            position=position,
+            market_skills=market_skills,
+        )
         return ResumeFeedbackResponse(
             feedback=feedback,
             questions=questions,
             model="primary",
             degraded=False,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("gemini feedback failed: %s", exc)
         feedback, questions = _generate_fallback(skills=skills, position=position)
         return ResumeFeedbackResponse(
             feedback=feedback,
@@ -42,27 +68,54 @@ def generate_resume_feedback(
         )
 
 
+def _get_market_demand_skills(
+    *,
+    session: Session,
+    position: str,
+    pool: str | None,
+) -> list[str]:
+    if pool:
+        items, _sample_size = get_skill_share(session, pool=pool, position=position, top_k=8)
+        names = [str(item["canonical"]) for item in items if item.get("canonical")]
+        if names:
+            return names
+
+    normalized_position = position.lower()
+    return list(MARKET_SKILLS_BY_POSITION.get(normalized_position, DEFAULT_MARKET_SKILLS))
+
+
 def _generate_with_gemini(
     *,
     skills: list[dict[str, Any]],
     position: str,
+    market_skills: list[str],
 ) -> tuple[list[str], list[str]]:
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
 
     request_body = {
-        "model": settings.gemini_model,
-        "system_instruction": (
-            "You are a Korean technical resume reviewer. "
-            "Return only valid JSON with feedback and questions arrays."
-        ),
-        "input": _build_prompt(skills=skills, position=position),
-        "generation_config": {
+        "systemInstruction": {"parts": [{"text": STRICT_INTERVIEWER_SYSTEM_INSTRUCTION}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": _build_prompt(
+                            skills=skills,
+                            position=position,
+                            market_skills=market_skills,
+                        )
+                    }
+                ],
+            }
+        ],
+        "generationConfig": {
             "temperature": 0.4,
+            "responseMimeType": "application/json",
         },
     }
     request = urllib.request.Request(
-        "https://generativelanguage.googleapis.com/v1beta/interactions",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
         data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
@@ -89,17 +142,25 @@ def _generate_with_gemini(
     return feedback, questions
 
 
-def _build_prompt(*, skills: list[dict[str, Any]], position: str) -> str:
+def _build_prompt(
+    *,
+    skills: list[dict[str, Any]],
+    position: str,
+    market_skills: list[str],
+) -> str:
     skill_names = [str(skill.get("canonical", "")).strip() for skill in skills]
     skill_names = [skill for skill in skill_names if skill]
     return json.dumps(
         {
-            "task": "확정된 이력서 스킬셋을 기준으로 개선 피드백과 예상 면접 질문을 생성하세요.",
+            "task": "확정된 이력서 스킬셋을 기준으로, 엄격한 면접관 관점의 개선 피드백과 예상 면접 질문을 생성하세요.",
             "position": position,
             "skills": skill_names,
+            "현재 채용 시장 수요 스킬": market_skills,
             "requirements": [
-                "feedback는 2~4개, questions는 3~5개를 작성하세요.",
+                "feedback는 2~4개, questions는 4~5개를 작성하세요.",
                 "각 문장은 한국어로 작성하세요.",
+                "questions는 지원자의 보유 스킬 중 최소 1개, '현재 채용 시장 수요 스킬' 중 지원자가 갖추지 못한 스킬 중 최소 1개와 연결되어야 합니다.",
+                "표면적인 용어 나열이 아니라 트레이드오프, 실패 사례, 프로덕션 운영 경험을 파고드는 질문으로 작성하세요.",
                 "스킬셋에 없는 경험을 단정하지 말고, 이력서에 드러나면 좋은 보완점으로 표현하세요.",
                 "응답은 JSON 객체만 반환하세요.",
             ],
@@ -110,25 +171,23 @@ def _build_prompt(*, skills: list[dict[str, Any]], position: str) -> str:
 
 
 def _extract_text(response_body: dict[str, Any]) -> str:
-    output_text = response_body.get("output_text")
-    if isinstance(output_text, str):
-        return output_text
+    candidates = response_body.get("candidates") or []
+    if not candidates:
+        prompt_feedback = response_body.get("promptFeedback")
+        raise RuntimeError(
+            f"Gemini response has no candidates (promptFeedback={prompt_feedback!r})"
+        )
 
-    texts: list[str] = []
-    for step in response_body.get("steps", []):
-        for part in step.get("content", []):
-            text = part.get("text")
-            if isinstance(text, str):
-                texts.append(text)
-    if texts:
-        return "\n".join(texts)
-
-    candidates = response_body.get("candidates", [])
-    for candidate in candidates:
-        for part in candidate.get("content", {}).get("parts", []):
-            text = part.get("text")
-            if isinstance(text, str):
-                texts.append(text)
+    candidate = candidates[0]
+    finish_reason = candidate.get("finishReason")
+    parts = candidate.get("content", {}).get("parts", [])
+    texts = [part.get("text") for part in parts if isinstance(part.get("text"), str)]
+    if not texts:
+        prompt_feedback = response_body.get("promptFeedback")
+        raise RuntimeError(
+            "Gemini response has no text parts "
+            f"(finishReason={finish_reason!r}, promptFeedback={prompt_feedback!r})"
+        )
     return "\n".join(texts)
 
 
