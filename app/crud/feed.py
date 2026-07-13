@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -7,9 +9,16 @@ from app.crud.posting import (
     _get_filtered_postings,
     _get_posting_urls,
 )
-from app.models.posting import Posting, PostingCategory, PostingTech
+from app.models.cert import Cert
+from app.models.concept import Concept
+from app.models.posting import Posting, PostingCategory, PostingCert, PostingConcept, PostingTech, RawPosting
 from app.models.skill import Skill
 from app.schemas.feed import FeedMatch, FeedPostingItem
+
+_DESCRIPTION_SNIPPET_KEYS = ("description", "description_ko", "body", "content", "intro")
+_DESCRIPTION_SNIPPET_MAX_LEN = 300
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _get_feed_skills(session: Session, posting_ids: list[int]) -> dict[int, list[tuple[int, str]]]:
@@ -49,6 +58,75 @@ def _get_feed_categories(session: Session, posting_ids: list[int]) -> dict[int, 
     return out
 
 
+def _get_feed_concepts(session: Session, posting_ids: list[int]) -> dict[int, list[str]]:
+    if not posting_ids:
+        return {}
+    rows = session.execute(
+        select(PostingConcept.posting_id, Concept.name)
+        .join(Concept, Concept.id == PostingConcept.concept_id)
+        .where(
+            PostingConcept.posting_id.in_(posting_ids),
+            PostingConcept.is_deleted.is_(False),
+            Concept.is_deleted.is_(False),
+        )
+        .order_by(Concept.name)
+    ).all()
+    out: dict[int, list[str]] = {}
+    for posting_id, name in rows:
+        out.setdefault(posting_id, []).append(name)
+    return out
+
+
+def _get_feed_certs(session: Session, posting_ids: list[int]) -> dict[int, list[str]]:
+    if not posting_ids:
+        return {}
+    rows = session.execute(
+        select(PostingCert.posting_id, Cert.name)
+        .join(Cert, Cert.id == PostingCert.cert_id)
+        .where(
+            PostingCert.posting_id.in_(posting_ids),
+            PostingCert.is_deleted.is_(False),
+            Cert.is_deleted.is_(False),
+        )
+        .order_by(Cert.name)
+    ).all()
+    out: dict[int, list[str]] = {}
+    for posting_id, name in rows:
+        out.setdefault(posting_id, []).append(name)
+    return out
+
+
+def _extract_description_snippet(payload: dict | None) -> str | None:
+    if not payload:
+        return None
+    for key in _DESCRIPTION_SNIPPET_KEYS:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            text = _HTML_TAG_RE.sub(" ", value)
+            text = _WHITESPACE_RE.sub(" ", text).strip()
+            return text[:_DESCRIPTION_SNIPPET_MAX_LEN] if text else None
+    return None
+
+
+def _get_feed_description_snippets(session: Session, posting_ids: list[int]) -> dict[int, str | None]:
+    """posting_id -> 최신 RawPosting.payload에서 뽑은 설명 스니펫 (없으면 None)."""
+    if not posting_ids:
+        return {}
+    rows = session.execute(
+        select(RawPosting.posting_id, RawPosting.payload, RawPosting.captured_at)
+        .where(
+            RawPosting.posting_id.in_(posting_ids),
+            RawPosting.is_deleted.is_(False),
+        )
+        .order_by(RawPosting.captured_at.desc())
+    ).all()
+    out: dict[int, str | None] = {}
+    for posting_id, payload, _captured_at in rows:
+        if posting_id not in out:
+            out[posting_id] = _extract_description_snippet(payload)
+    return out
+
+
 def _build_match(
     skills: list[tuple[int, str]], owned_skill_ids: set[int] | None
 ) -> FeedMatch | None:
@@ -68,6 +146,9 @@ def _build_feed_items(
     ids = [p.id for p in postings]
     skills_map = _get_feed_skills(session, ids)
     categories_map = _get_feed_categories(session, ids)
+    concepts_map = _get_feed_concepts(session, ids)
+    certs_map = _get_feed_certs(session, ids)
+    snippets_map = _get_feed_description_snippets(session, ids)
     urls = _get_posting_urls(session, ids)
 
     items: list[FeedPostingItem] = []
@@ -85,6 +166,10 @@ def _build_feed_items(
                 close_date=p.close_date,
                 categories=categories_map.get(p.id, []),
                 skills=[name for _, name in skills],
+                concepts=concepts_map.get(p.id, []),
+                certs=certs_map.get(p.id, []),
+                seniority=p.seniority_raw,
+                description_snippet=snippets_map.get(p.id),
                 url=urls.get(p.id, ""),
                 career_min=p.career_min,
                 career_max=p.career_max,
