@@ -70,7 +70,7 @@ def get_postings(
     session: SessionDep,
     pool: Annotated[Pool | None, Query(description="global 또는 domestic")] = None,
     position: Annotated[str | None, Query(description="직무 필터")] = None,
-    sort: Annotated[PostingSort, Query(description="latest 또는 deadline")] = "latest",
+    sort: Annotated[PostingSort, Query(description="latest, deadline 또는 match")] = "latest",
     match_only: Annotated[bool, Query(description="이력서와 매칭되는 공고만 조회")] = False,
     resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
     district: Annotated[str | None, Query(description="지역(구/동) 필터. region_district 부분일치")] = None,
@@ -80,8 +80,10 @@ def get_postings(
     min_match: Annotated[
         float | None, Query(ge=0, le=100, description="최소 매칭률(%). resume_id 필요")
     ] = None,
+    q: Annotated[str | None, Query(min_length=1, max_length=200, description="제목 또는 회사 검색어")] = None,
+    skills: Annotated[str | None, Query(description="쉼표로 구분한 기술명(하나 이상 일치)")] = None,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
     authorization: Annotated[str | None, Header()] = None,
 ) -> PostingListResponse:
     if sort == "deadline" and pool == "global":
@@ -97,7 +99,7 @@ def get_postings(
         )
 
     user_id = None
-    if match_only or min_match is not None:
+    if resume_id is not None:
         current_user = get_user_from_optional_authorization(session, authorization)
         if current_user is None:
             raise HTTPException(
@@ -119,6 +121,8 @@ def get_postings(
         district=district,
         deadline_within_days=deadline_within_days,
         min_match=min_match,
+        q=q,
+        skills=[skill.strip() for skill in skills.split(",") if skill.strip()] if skills else None,
     )
 
     return PostingListResponse(

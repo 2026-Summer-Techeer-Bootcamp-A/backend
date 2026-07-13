@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -84,6 +84,17 @@ def client() -> Iterator[TestClient]:
             post_date=date(2026, 7, 4),
         )
         seed.add_all([older, newer, frontend, global_posting])
+        seed.add_all(
+            Posting(
+                source="himalayas",
+                source_uid=f"himalayas-extra-{index}",
+                pool="global",
+                company=f"Global {index}",
+                title=f"Platform Engineer {index}",
+                post_date=date(2026, 6, index),
+            )
+            for index in range(1, 31)
+        )
         seed.commit()
 
         seed.add_all(
@@ -110,7 +121,9 @@ def client() -> Iterator[TestClient]:
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    yield TestClient(app)
+    test_client = TestClient(app)
+    test_client.app.state.postings_test_engine = engine
+    yield test_client
     app.dependency_overrides.clear()
 
 
@@ -140,7 +153,7 @@ def test_get_postings_returns_filtered_latest_cards(client: TestClient) -> None:
             },
         ],
         "page": 1,
-        "page_size": 20,
+        "page_size": 25,
         "total": 2,
         "as_of": date.today().isoformat(),
     }
@@ -182,6 +195,22 @@ def test_get_postings_match_only_requires_resume_id(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_get_postings_sorts_by_match_in_sql_before_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+
+    response = client.get(
+        "/api/v1/postings?pool=domestic&sort=match&resume_id=1&page=1&page_size=25",
+        headers={"Authorization": f"Bearer {create_access_token(1)}"},
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [3, 1, 2]
+    assert [item["matched_count"] for item in response.json()["items"]] == [1, 1, 0]
+
+
 def test_get_postings_paginates_after_filtering_and_sorting(client: TestClient) -> None:
     response = client.get("/api/v1/postings?pool=domestic&page=2&page_size=1")
 
@@ -190,6 +219,50 @@ def test_get_postings_paginates_after_filtering_and_sorting(client: TestClient) 
     assert response.json()["page_size"] == 1
     assert response.json()["total"] == 3
     assert len(response.json()["items"]) == 1
+
+
+def test_get_postings_applies_page_size_in_database_result(client: TestClient) -> None:
+    first = client.get("/api/v1/postings?pool=global&page=1&page_size=25").json()
+    second = client.get("/api/v1/postings?pool=global&page=2&page_size=25").json()
+
+    assert first["total"] == 31
+    assert len(first["items"]) == 25
+    assert len(second["items"]) == 6
+    assert {item["id"] for item in first["items"]}.isdisjoint(item["id"] for item in second["items"])
+    assert first["page"] == 1
+    assert first["page_size"] == 25
+
+
+def test_get_postings_query_contains_sql_limit_and_offset(client: TestClient) -> None:
+    statements: list[str] = []
+    engine = client.app.state.postings_test_engine
+
+    def capture_statement(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+        statements.append(statement.upper())
+
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        response = client.get("/api/v1/postings?pool=global&page=2&page_size=25")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert response.status_code == 200
+    posting_page_queries = [
+        statement for statement in statements
+        if "FROM POSTING" in statement and "ORDER BY" in statement
+    ]
+    assert any("LIMIT" in statement and "OFFSET" in statement for statement in posting_page_queries)
+
+
+def test_get_postings_search_and_skill_filters_apply_before_pagination(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/postings",
+        params={"pool": "domestic", "q": "backend", "skills": "Python", "page_size": 25},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert [item["id"] for item in response.json()["items"]] == [1]
 
 
 def test_get_posting_detail_returns_full_posting(client: TestClient) -> None:
