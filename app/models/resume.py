@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -15,7 +15,16 @@ class Resume(TimestampMixin, SoftDeleteMixin, Base):
     """이력서 — 스킬셋·메타만 저장(원본 PDF·개인정보는 저장하지 않음)."""
 
     __tablename__ = "resume"
-    __table_args__ = (CheckConstraint("pool IN ('domestic', 'global')", name="ck_resume_pool"),)
+    __table_args__ = (
+        CheckConstraint("pool IN ('domestic', 'global')", name="ck_resume_pool"),
+        Index(
+            "uq_resume_user_primary",
+            "user_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+            sqlite_where=text("is_primary"),
+        ),
+    )
 
     resume_id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False, index=True)
@@ -24,6 +33,8 @@ class Resume(TimestampMixin, SoftDeleteMixin, Base):
     career_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     career_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pool: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(default=False, server_default="false")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

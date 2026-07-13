@@ -10,8 +10,12 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base, get_session
 from app.main import app
 from app.models import (
+    Cert,
+    Concept,
     Posting,
     PostingCategory,
+    PostingCert,
+    PostingConcept,
     PostingTech,
     RawPosting,
     Resume,
@@ -66,6 +70,7 @@ def client() -> Iterator[TestClient]:
             career_min=3,
             career_max=7,
             response_rate=82.5,
+            seniority_raw="시니어",
         )
         p2 = Posting(
             source="wanted",
@@ -86,6 +91,17 @@ def client() -> Iterator[TestClient]:
         seed.add_all([p1, p2, p3])
         seed.commit()
 
+        msa = Concept(name="MSA", category="architecture")
+        cicd = Concept(name="CI/CD", category="process")
+        infoproc = Cert(name="정보처리기사")
+        seed.add_all([msa, cicd, infoproc])
+        seed.flush()
+
+        p1_description = (
+            "<p>Python, Django 백엔드 개발자를\n   모집합니다.</p>"
+            "<br/>우대사항: <b>MSA</b> 경험"
+        )
+
         seed.add_all(
             [
                 PostingCategory(posting_id=p1.id, category="백엔드"),
@@ -93,7 +109,13 @@ def client() -> Iterator[TestClient]:
                 PostingTech(posting_id=p1.id, skill_id=python.id),
                 PostingTech(posting_id=p1.id, skill_id=aws.id),
                 PostingTech(posting_id=p2.id, skill_id=react.id),
-                RawPosting(posting_id=p1.id, payload={"url": "https://example.com/p1"}),
+                PostingConcept(posting_id=p1.id, concept_id=msa.id),
+                PostingConcept(posting_id=p1.id, concept_id=cicd.id),
+                PostingCert(posting_id=p1.id, cert_id=infoproc.id),
+                RawPosting(
+                    posting_id=p1.id,
+                    payload={"url": "https://example.com/p1", "description": p1_description},
+                ),
                 RawPosting(posting_id=p2.id, payload={"url": "https://example.com/p2"}),
                 RawPosting(posting_id=p3.id, payload={"url": "https://example.com/p3"}),
             ]
@@ -120,15 +142,26 @@ def test_feed_anonymous_returns_cards_without_match(client):
     assert first["region"] == "서울"
     assert first["categories"] == ["백엔드"]
     assert sorted(first["skills"]) == ["aws", "python"]
+    assert sorted(first["concepts"]) == ["CI/CD", "MSA"]
+    assert first["certs"] == ["정보처리기사"]
+    assert first["seniority"] == "시니어"
+    assert first["description_snippet"] == (
+        "Python, Django 백엔드 개발자를 모집합니다. 우대사항: MSA 경험"
+    )
+    assert "<" not in first["description_snippet"]
     assert first["match"] is None
     assert first["career_min"] == 3
     assert first["career_max"] == 7
     assert first["response_rate"] == 82.5
 
-    second = body["items"][1]  # p2: career_min/max/response_rate 미지정
+    second = body["items"][1]  # p2: career_min/max/response_rate 미지정, 개념/자격증/설명 없음
     assert second["career_min"] is None
     assert second["career_max"] is None
     assert second["response_rate"] is None
+    assert second["concepts"] == []
+    assert second["certs"] == []
+    assert second["seniority"] is None
+    assert second["description_snippet"] is None  # payload에 description 키가 없음
 
 
 def test_feed_authed_includes_match(client, monkeypatch):
@@ -258,3 +291,30 @@ def test_feed_min_match_range_validated(client):
     assert res.status_code == 422
     res = client.get("/api/v1/feed/postings", params={"min_match": -1})
     assert res.status_code == 422
+
+
+def test_description_snippet_extraction_handles_html_and_edge_cases():
+    from app.crud.feed import _extract_description_snippet
+
+    # payload가 없거나(None) description류 키가 비어 있으면 None
+    assert _extract_description_snippet(None) is None
+    assert _extract_description_snippet({}) is None
+    assert _extract_description_snippet({"description": "   "}) is None
+
+    # 300자를 넘는 본문은 잘린다
+    long_text = "<div>" + ("가" * 350) + "</div>"
+    snippet = _extract_description_snippet({"description": long_text})
+    assert snippet == "가" * 300
+    assert len(snippet) == 300
+
+    # HTML 태그가 제거되고 공백이 정리된다
+    assert _extract_description_snippet({"body": "<p>Body   content</p>"}) == "Body content"
+
+    # 키 우선순위: description > description_ko > body > content > intro
+    assert (
+        _extract_description_snippet({"description": "primary", "body": "secondary"}) == "primary"
+    )
+    assert (
+        _extract_description_snippet({"description_ko": "ko", "content": "en"}) == "ko"
+    )
+    assert _extract_description_snippet({"content": "from content"}) == "from content"
