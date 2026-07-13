@@ -27,6 +27,20 @@ class PostingListResponse(BaseModel):
     as_of: str
 
 
+class NearbyPostingsResponse(BaseModel):
+    items: list[PostingCardItem]
+    as_of: str
+
+
+class SimilarPostingItem(PostingCardItem):
+    overlap_count: int
+
+
+class SimilarPostingsResponse(BaseModel):
+    items: list[SimilarPostingItem]
+    as_of: str
+
+
 class PostingDetailResponse(BaseModel):
     id: int
     source: str

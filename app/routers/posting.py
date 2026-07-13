@@ -4,9 +4,16 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.core.deps import SessionDep
-from app.crud.posting import get_posting_detail, list_posting_cards
+from app.crud.posting import get_nearby_postings, get_posting_detail, get_similar_postings, list_posting_cards
 from app.routers.match import get_user_from_optional_authorization
-from app.schemas.posting import Pool, PostingDetailResponse, PostingListResponse, PostingSort
+from app.schemas.posting import (
+    NearbyPostingsResponse,
+    Pool,
+    PostingDetailResponse,
+    PostingListResponse,
+    PostingSort,
+    SimilarPostingsResponse,
+)
 
 
 router = APIRouter()
@@ -22,6 +29,36 @@ def get_posting(
     session: SessionDep,
 ) -> PostingDetailResponse:
     return PostingDetailResponse(**get_posting_detail(session, posting_id=posting_id))
+
+
+@router.get(
+    "/postings/{posting_id}/nearby",
+    response_model=NearbyPostingsResponse,
+    response_model_exclude_none=True,
+)
+def get_posting_nearby(
+    posting_id: int,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> NearbyPostingsResponse:
+    """자기 자신을 제외한, 같은 지역(region_district)의 최신 공고."""
+    items = get_nearby_postings(session, posting_id=posting_id, limit=limit)
+    return NearbyPostingsResponse(items=items, as_of=date.today().isoformat())
+
+
+@router.get(
+    "/postings/{posting_id}/similar",
+    response_model=SimilarPostingsResponse,
+    response_model_exclude_none=True,
+)
+def get_posting_similar(
+    posting_id: int,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> SimilarPostingsResponse:
+    """자기 자신을 제외한, 요구 기술 겹침이 많은 순 유사 공고."""
+    items = get_similar_postings(session, posting_id=posting_id, limit=limit)
+    return SimilarPostingsResponse(items=items, as_of=date.today().isoformat())
 
 
 @router.get(
