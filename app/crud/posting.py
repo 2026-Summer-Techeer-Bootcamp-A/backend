@@ -46,13 +46,55 @@ def list_posting_cards(
     min_match: float | None = None,
 ) -> tuple[list[dict], int]:
     needs_owned_skills = (match_only or min_match is not None) and resume_id is not None and user_id is not None
-    owned_skill_ids: set[int] = set()
-    if needs_owned_skills:
-        owned_skill_ids = get_resume_skill_ids(
-            session,
-            resume_id=resume_id,
-            user_id=user_id,
+
+    if not needs_owned_skills:
+        # 매칭 필터가 없는 일반 조회는 DB 레벨에서 페이지를 자른다. 그래야 이
+        # 함수가 다루는 posting_id 수가 page_size(최대 100)를 넘지 않아,
+        # 필터에 걸리는 공고가 아무리 많아도 안전하다.
+        total = _count_filtered_postings(
+            session=session,
+            pool=pool,
+            position=position,
+            district=district,
+            deadline_within_days=deadline_within_days,
         )
+        postings = _get_filtered_postings(
+            session=session,
+            pool=pool,
+            position=position,
+            sort=sort,
+            district=district,
+            deadline_within_days=deadline_within_days,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
+        posting_ids = [posting.id for posting in postings]
+        skill_map, _skill_id_map = _get_posting_skills(session, posting_ids)
+        url_map = _get_posting_urls(session, posting_ids)
+
+        cards = [
+            {
+                "id": posting.id,
+                "title": posting.title,
+                "company": posting.company,
+                "post_date": posting.post_date,
+                "close_date": posting.close_date,
+                "skills": skill_map.get(posting.id, []),
+                "url": url_map.get(posting.id, ""),
+            }
+            for posting in postings
+        ]
+        return cards, total
+
+    # 매칭 필터(match_only/min_match)는 페이지를 정하기 전에 이력서 보유 기술과의
+    # 겹침을 계산해야 해서, DB 레벨 LIMIT/OFFSET을 적용할 수 없다. 필터에 걸리는
+    # 공고 전체를 가져오지만, _get_posting_skills/_get_posting_urls가 내부적으로
+    # IN 절을 청크 처리하므로 건수가 아무리 많아도 안전하다.
+    owned_skill_ids = get_resume_skill_ids(
+        session,
+        resume_id=resume_id,
+        user_id=user_id,
+    )
 
     postings = _get_filtered_postings(
         session=session,
@@ -69,9 +111,7 @@ def list_posting_cards(
     cards = []
     for posting in postings:
         required_ids = skill_id_map.get(posting.id, set())
-        matched_count = None
-        if match_only or min_match is not None:
-            matched_count = len(required_ids & owned_skill_ids)
+        matched_count = len(required_ids & owned_skill_ids)
 
         if match_only and matched_count < 1:
             continue
@@ -89,9 +129,8 @@ def list_posting_cards(
             "close_date": posting.close_date,
             "skills": skill_map.get(posting.id, []),
             "url": url_map.get(posting.id, ""),
+            "matched_count": matched_count,
         }
-        if matched_count is not None:
-            card["matched_count"] = matched_count
         cards.append(card)
 
     total = len(cards)
@@ -134,16 +173,17 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
     }
 
 
-def _get_filtered_postings(
-    session: Session,
+def _apply_posting_filters(
+    stmt,
     *,
     pool: str | None,
     position: str | None,
-    sort: str,
-    district: str | None = None,
-    deadline_within_days: int | None = None,
-) -> list[Posting]:
-    stmt = select(Posting).where(Posting.is_deleted.is_(False))
+    district: str | None,
+    deadline_within_days: int | None,
+):
+    """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
+    실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
+    stmt = stmt.where(Posting.is_deleted.is_(False))
 
     if pool is not None:
         stmt = stmt.where(Posting.pool == pool)
@@ -165,10 +205,55 @@ def _get_filtered_postings(
             Posting.close_date <= today + timedelta(days=deadline_within_days),
         )
 
+    return stmt
+
+
+def _count_filtered_postings(
+    session: Session,
+    *,
+    pool: str | None,
+    position: str | None,
+    district: str | None = None,
+    deadline_within_days: int | None = None,
+) -> int:
+    stmt = _apply_posting_filters(
+        select(func.count(distinct(Posting.id))),
+        pool=pool,
+        position=position,
+        district=district,
+        deadline_within_days=deadline_within_days,
+    )
+    return session.execute(stmt).scalar_one()
+
+
+def _get_filtered_postings(
+    session: Session,
+    *,
+    pool: str | None,
+    position: str | None,
+    sort: str,
+    district: str | None = None,
+    deadline_within_days: int | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> list[Posting]:
+    stmt = _apply_posting_filters(
+        select(Posting),
+        pool=pool,
+        position=position,
+        district=district,
+        deadline_within_days=deadline_within_days,
+    )
+
     if sort == "deadline":
         stmt = stmt.order_by(Posting.close_date.is_(None), Posting.close_date.asc(), Posting.id.asc())
     else:
         stmt = stmt.order_by(Posting.post_date.is_(None), Posting.post_date.desc(), Posting.id.desc())
+
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    if offset is not None:
+        stmt = stmt.offset(offset)
 
     return list(session.execute(stmt).scalars().unique().all())
 
@@ -203,6 +288,19 @@ def _format_region(posting: Posting) -> str | None:
     return posting.region_city or posting.region_district or posting.region_country
 
 
+# Postgres는 한 쿼리에 바인딩할 수 있는 파라미터가 65,535개로 제한된다. 필터에
+# 걸리는 공고가 그 이상이면(예: 필터 없는 전체 조회) IN 절 하나로 다 묶는 순간
+# OperationalError로 쿼리 자체가 거부된다. 이를 피하기 위해 항상 이 크기 이하로
+# 청크를 나눠 여러 번 조회한다. posting_id는 청크 사이에서 겹치지 않으므로,
+# 각 공고의 결과는 정확히 하나의 청크에서만 채워진다.
+_IN_CLAUSE_CHUNK_SIZE = 5000
+
+
+def _chunked(items: list[int], size: int) -> Iterable[list[int]]:
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
 def _get_posting_skills(
     session: Session,
     posting_ids: Iterable[int],
@@ -211,22 +309,22 @@ def _get_posting_skills(
     if not ids:
         return {}, {}
 
-    rows = session.execute(
-        select(PostingTech.posting_id, Skill.id, Skill.canonical)
-        .join(Skill, Skill.id == PostingTech.skill_id)
-        .where(
-            PostingTech.posting_id.in_(ids),
-            PostingTech.is_deleted.is_(False),
-            Skill.is_deleted.is_(False),
-        )
-        .order_by(Skill.canonical.asc())
-    ).all()
-
     skill_map: dict[int, list[str]] = {}
     skill_id_map: dict[int, set[int]] = {}
-    for posting_id, skill_id, canonical in rows:
-        skill_map.setdefault(posting_id, []).append(canonical)
-        skill_id_map.setdefault(posting_id, set()).add(skill_id)
+    for batch in _chunked(ids, _IN_CLAUSE_CHUNK_SIZE):
+        rows = session.execute(
+            select(PostingTech.posting_id, Skill.id, Skill.canonical)
+            .join(Skill, Skill.id == PostingTech.skill_id)
+            .where(
+                PostingTech.posting_id.in_(batch),
+                PostingTech.is_deleted.is_(False),
+                Skill.is_deleted.is_(False),
+            )
+            .order_by(Skill.canonical.asc())
+        ).all()
+        for posting_id, skill_id, canonical in rows:
+            skill_map.setdefault(posting_id, []).append(canonical)
+            skill_id_map.setdefault(posting_id, set()).add(skill_id)
 
     return skill_map, skill_id_map
 
@@ -236,19 +334,19 @@ def _get_posting_urls(session: Session, posting_ids: Iterable[int]) -> dict[int,
     if not ids:
         return {}
 
-    rows = session.execute(
-        select(RawPosting.posting_id, RawPosting.payload, RawPosting.captured_at)
-        .where(
-            RawPosting.posting_id.in_(ids),
-            RawPosting.is_deleted.is_(False),
-        )
-        .order_by(RawPosting.captured_at.desc())
-    ).all()
-
     url_map: dict[int, str] = {}
-    for posting_id, payload, _captured_at in rows:
-        if posting_id not in url_map:
-            url_map[posting_id] = _extract_url(payload)
+    for batch in _chunked(ids, _IN_CLAUSE_CHUNK_SIZE):
+        rows = session.execute(
+            select(RawPosting.posting_id, RawPosting.payload, RawPosting.captured_at)
+            .where(
+                RawPosting.posting_id.in_(batch),
+                RawPosting.is_deleted.is_(False),
+            )
+            .order_by(RawPosting.captured_at.desc())
+        ).all()
+        for posting_id, payload, _captured_at in rows:
+            if posting_id not in url_map:
+                url_map[posting_id] = _extract_url(payload)
 
     return url_map
 
