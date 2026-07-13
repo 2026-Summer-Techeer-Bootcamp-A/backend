@@ -28,7 +28,7 @@ from app.models import (
     SkillAlias,
 )
 
-DOMESTIC_SOURCES = {"wanted", "jumpit"}
+DOMESTIC_SOURCES = {"wanted", "jumpit", "jobkorea"}
 
 
 def split_posting_id(posting_id: str) -> tuple[str, str]:

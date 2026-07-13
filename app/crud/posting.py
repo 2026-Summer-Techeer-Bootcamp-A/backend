@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterable
 from datetime import date, timedelta
 
@@ -96,6 +97,7 @@ def list_posting_cards(
             "close_date": posting.close_date,
             "skills": skill_map.get(posting.id, []),
             "url": url_map.get(posting.id, ""),
+            "logo_url": posting.logo_url,
         }
         if owned_skill_ids is not None:
             card["matched_count"] = len(required_ids & owned_skill_ids)
@@ -136,6 +138,8 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
         "skills": skill_map.get(posting.id, []),
         "certs": _get_posting_certs(session, posting.id),
         "url": url_map.get(posting.id, ""),
+        "logo_url": posting.logo_url,
+        "desc_sections": json.loads(posting.description) if posting.description else [],
     }
 
 
@@ -155,6 +159,8 @@ def _apply_posting_filters(
     """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
     실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
     stmt = stmt.where(Posting.is_deleted.is_(False))
+    # 마감일이 지난 공고는 기본적으로 목록에서 제외한다(마감일 자체가 없는 상시채용은 유지).
+    stmt = stmt.where(Posting.close_date.is_(None) | (Posting.close_date >= date.today()))
 
     if pool is not None:
         stmt = stmt.where(Posting.pool == pool)
@@ -442,6 +448,7 @@ def _build_cards(session: Session, postings: list[Posting]) -> list[dict]:
             "close_date": p.close_date,
             "skills": skill_map.get(p.id, []),
             "url": url_map.get(p.id, ""),
+            "logo_url": p.logo_url,
         }
         for p in postings
     ]
@@ -461,6 +468,7 @@ def get_nearby_postings(session: Session, *, posting_id: int, limit: int = 10) -
                 Posting.id != posting_id,
                 Posting.region_district == posting.region_district,
                 Posting.is_deleted.is_(False),
+                Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
             )
             .order_by(Posting.post_date.is_(None), Posting.post_date.desc(), Posting.id.desc())
             .limit(limit)
@@ -505,7 +513,13 @@ def get_similar_postings(session: Session, *, posting_id: int, limit: int = 10) 
         return []
 
     postings = (
-        session.execute(select(Posting).where(Posting.id.in_(overlap_map.keys()), Posting.is_deleted.is_(False)))
+        session.execute(
+            select(Posting).where(
+                Posting.id.in_(overlap_map.keys()),
+                Posting.is_deleted.is_(False),
+                Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
+            )
+        )
         .scalars()
         .unique()
         .all()
