@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Discord 웹훅 URL은 시크릿이라 이 파일에 직접 적지 않는다. $__env{...}는 Grafana
+# 자체의 provisioning 환경변수 치환 매크로로, 컨테이너 환경변수 DISCORD_WEBHOOK_URL
+# 값을 런타임에 끼워 넣는다(로컬 격리 컨테이너로 직접 발사까지 확인해 검증함).
+contactPoints:
+  - orgId: 1
+    name: discord-alerts
+    receivers:
+      - uid: discord-alerts-1
+        type: discord
+        settings:
+          url: $__env{DISCORD_WEBHOOK_URL}
+          use_discord_username: true
+        disableResolveMessage: false

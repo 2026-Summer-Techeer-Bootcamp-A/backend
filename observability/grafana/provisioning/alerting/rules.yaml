@@ -1,0 +1,222 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: traffic-and-latency
+    folder: production-alerts
+    interval: 1m
+    rules:
+      - uid: alert-traffic-surge
+        title: "트래픽 급증"
+        condition: C
+        for: 2m
+        annotations:
+          summary: "1분 요청 처리량이 5 req/s를 넘었다. 봇 스캔인지 실제 유입인지 확인한다."
+          logs_hint: 'Explore > Loki 데이터소스 > {container="app-app-1"} 로 그 시간대 로그 확인'
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            datasourceUid: Prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: 'sum(rate(http_requests_total{job="app"}[1m]))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [5] }
+              refId: C
+        noDataState: OK
+        execErrState: OK
+
+      - uid: alert-high-error-rate
+        title: "5xx 오류율 급증"
+        condition: C
+        for: 2m
+        annotations:
+          summary: "5xx 오류율이 5%를 넘었다. 최근 배포나 DB 상태를 먼저 확인한다."
+          logs_hint: 'Explore > Loki 데이터소스 > {container="app-app-1"} |= "ERROR" 로 예외 확인'
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            datasourceUid: Prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: >-
+                (sum(rate(http_requests_total{job="app",status=~"5.."}[2m])) or vector(0))
+                /
+                (sum(rate(http_requests_total{job="app"}[2m])) or vector(1))
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+              refId: C
+        noDataState: OK
+        execErrState: OK
+
+      - uid: alert-high-latency-p95
+        title: "p95 응답 지연 급증"
+        condition: C
+        for: 3m
+        annotations:
+          summary: "p95 응답 지연이 1초를 넘었다. 느린 엔드포인트는 Endpoint Ranking 패널로 좁힌다."
+          logs_hint: 'Explore > Loki 데이터소스 > {container="app-app-1"} 로 그 시간대 로그 확인'
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            datasourceUid: Prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: 'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="app"}[5m])) by (le))'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [1] }
+              refId: C
+        noDataState: OK
+        execErrState: OK
+
+  - orgId: 1
+    name: resource-usage
+    folder: production-alerts
+    interval: 1m
+    rules:
+      - uid: alert-high-cpu
+        title: "VM CPU 사용률 급증"
+        condition: C
+        for: 5m
+        annotations:
+          summary: "VM CPU 사용률이 85%를 넘었다. system-perf-monitoring 대시보드를 확인한다."
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            datasourceUid: Prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: '100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [85] }
+              refId: C
+        noDataState: OK
+        execErrState: OK
+
+      - uid: alert-high-memory
+        title: "VM 메모리 사용률 급증"
+        condition: C
+        for: 5m
+        annotations:
+          summary: "VM 메모리 사용률이 85%를 넘었다. OOM 위험 구간이다."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            datasourceUid: Prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [85] }
+              refId: C
+        noDataState: OK
+        execErrState: OK
+
+      - uid: alert-db-connection-pressure
+        title: "DB 커넥션 사용률 급증"
+        condition: C
+        for: 5m
+        annotations:
+          summary: "Postgres 커넥션 사용률이 80%를 넘었다. db-perf-traffic 대시보드를 확인한다."
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            datasourceUid: Prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: 'sum(pg_stat_database_numbackends) / scalar(pg_settings_max_connections) * 100'
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [80] }
+              refId: C
+        noDataState: OK
+        execErrState: OK
