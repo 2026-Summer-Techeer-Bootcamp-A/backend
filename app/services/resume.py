@@ -9,8 +9,9 @@ from io import BytesIO
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.cert import Cert
 from app.models.skill import Skill, SkillAlias
-from app.schemas.resume import ParsedSkill, ResumeParseResponse
+from app.schemas.resume import ParsedCert, ParsedSkill, ResumeParseResponse
 
 
 POSITION_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -71,17 +72,37 @@ def parse_resume_pdf(pdf_bytes: bytes, session: Session) -> ResumeParseResponse:
     text = extract_pdf_text(pdf_bytes)
     if not text:
         raise ValueError("no extractable text")
-    return parse_resume_text(text, load_taxonomy(session))
+    return parse_resume_text(text, load_taxonomy(session), load_cert_names(session))
 
 
-def parse_resume_text(text: str, taxonomy: list[TaxonomyEntry]) -> ResumeParseResponse:
+def parse_resume_text(
+    text: str, taxonomy: list[TaxonomyEntry], cert_names: list[str] | None = None
+) -> ResumeParseResponse:
     career_min, career_max = extract_career_range(text)
     return ResumeParseResponse(
         skills=extract_skills(text, taxonomy),
+        certs=extract_certs(text, cert_names or []),
         position=extract_position(text),
         career_min=career_min,
         career_max=career_max,
     )
+
+
+def load_cert_names(session: Session) -> list[str]:
+    certs = session.scalars(select(Cert).where(Cert.is_deleted.is_(False))).all()
+    return [cert.name for cert in certs]
+
+
+def extract_certs(text: str, cert_names: list[str]) -> list[ParsedCert]:
+    normalized = text.lower()
+    found: list[tuple[int, ParsedCert]] = []
+
+    for name in cert_names:
+        position = normalized.find(name.lower())
+        if position != -1:
+            found.append((position, ParsedCert(name=name, in_dict=True)))
+
+    return [cert for _, cert in sorted(found, key=lambda item: item[0])]
 
 
 def load_taxonomy(session: Session) -> list[TaxonomyEntry]:
