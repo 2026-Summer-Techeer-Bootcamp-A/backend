@@ -10,6 +10,7 @@ from app.core.db import Base, get_session
 from app.core.security import create_access_token
 from app.main import app
 from app.models.user import User
+from app.models.cert import Cert
 from app.models.resume import Resume, ResumeCert, ResumeSkill
 from app.models.skill import Skill, SkillAlias
 
@@ -35,6 +36,7 @@ def client_with_skill_dictionary() -> Iterator[TestClient]:
                 SkillAlias(skill_id=react.id, alias="리액트", is_korean=True),
             ]
         )
+        seed.add(Cert(name="AWS Certified Solutions Architect"))
         seed.commit()
 
     def override_get_session() -> Iterator[Session]:
@@ -65,7 +67,10 @@ def test_parse_resume_returns_skills_position_and_career(
     monkeypatch.setattr(
         resume_service,
         "extract_pdf_text",
-        lambda _: "Backend developer with 3-5 years using Python, AWS, and 리액트. Also used MysteryTool.",
+        lambda _: (
+            "Backend developer with 3-5 years using Python, AWS, and 리액트. "
+            "Also used MysteryTool. Certified: AWS Certified Solutions Architect."
+        ),
     )
 
     response = client_with_skill_dictionary.post(
@@ -80,6 +85,9 @@ def test_parse_resume_returns_skills_position_and_career(
             {"canonical": "AWS", "category": "unknown", "in_dict": False},
             {"canonical": "React", "category": "frontend", "in_dict": True},
             {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
+        ],
+        "certs": [
+            {"name": "AWS Certified Solutions Architect", "in_dict": True},
         ],
         "position": "backend",
         "career_min": 3,
@@ -128,6 +136,7 @@ def test_confirm_resume_stores_confirmed_input_in_session(
             "career_min": 3,
             "career_max": 5,
             "pool": "global",
+            "memo": None,
         },
         "ttl": 3600,
     }
@@ -167,7 +176,7 @@ def test_resume_feedback_uses_confirmed_session_without_auth(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "app.routers.resume.generate_resume_feedback",
-        lambda *, skills, position: {
+        lambda *, skills, position, session, pool, memo=None: {
             "feedback": ["Docker 경험을 프로젝트 설명에 보강해보세요."],
             "questions": ["Python을 선택한 이유를 설명해주세요."],
             "model": "primary",
@@ -209,12 +218,21 @@ def test_resume_feedback_falls_back_when_gemini_is_unavailable(monkeypatch) -> N
 
     monkeypatch.setattr(resume_feedback.settings, "gemini_api_key", None)
 
-    response = resume_feedback.generate_resume_feedback(
-        skills=[
-            {"canonical": "Python", "category": "language", "in_dict": True},
-        ],
-        position="backend",
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        response = resume_feedback.generate_resume_feedback(
+            skills=[
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            position="backend",
+            session=session,
+            pool=None,
+        )
 
     assert response.degraded is True
     assert response.model == "fallback"
@@ -307,10 +325,12 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
             nickname="resume-user",
         )
         python = Skill(canonical="Python", category="language")
-        seed.add_all([user, python])
+        aws_cert = Cert(name="AWS Certified Solutions Architect")
+        seed.add_all([user, python, aws_cert])
         seed.commit()
         user_id = user.id
         python_id = python.id
+        aws_cert_id = aws_cert.id
 
     def override_get_session() -> Iterator[Session]:
         with testing_session() as session:
@@ -330,6 +350,10 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
                     {"canonical": "Python", "category": "language", "in_dict": True},
                     {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
                 ],
+                "certs": [
+                    {"name": "AWS Certified Solutions Architect", "in_dict": True},
+                    {"name": "MysteryCert", "in_dict": False},
+                ],
                 "position": "backend",
                 "career_min": 3,
                 "career_max": 5,
@@ -340,6 +364,17 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
         assert response.status_code == 201
         assert response.json() == {"resume_id": 1}
 
+        detail_response = client.get(
+            "/api/v1/resume/1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail_response.status_code == 200
+        assert detail_response.json()["certs"] == [
+            {"name": "AWS Certified Solutions Architect", "in_dict": True},
+            {"name": "MysteryCert", "in_dict": False},
+        ]
+        assert detail_response.json()["is_primary"] is True
+
         with testing_session() as session:
             resume = session.get(Resume, 1)
             assert resume is not None
@@ -349,6 +384,8 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
             assert resume.career_min == 3
             assert resume.career_max == 5
             assert resume.pool == "global"
+            # 유저의 첫 이력서이므로 자동으로 기본 이력서가 되어야 한다.
+            assert resume.is_primary is True
 
             stored_skills = session.query(ResumeSkill).order_by(ResumeSkill.id).all()
             assert len(stored_skills) == 2
@@ -358,6 +395,15 @@ def test_create_resume_stores_meta_and_skills_for_authenticated_user(
             assert stored_skills[1].skill_id is None
             assert stored_skills[1].raw_label == "MysteryTool"
             assert stored_skills[1].is_out_of_dict is True
+
+            stored_certs = session.query(ResumeCert).order_by(ResumeCert.id).all()
+            assert len(stored_certs) == 2
+            assert stored_certs[0].cert_id == aws_cert_id
+            assert stored_certs[0].raw_label is None
+            assert stored_certs[0].is_out_of_dict is False
+            assert stored_certs[1].cert_id is None
+            assert stored_certs[1].raw_label == "MysteryCert"
+            assert stored_certs[1].is_out_of_dict is True
     finally:
         app.dependency_overrides.clear()
 
@@ -425,10 +471,13 @@ def test_get_resume_returns_detail_for_owner(monkeypatch) -> None:
                 {"canonical": "Python", "category": "language", "in_dict": True},
                 {"canonical": "MysteryTool", "category": "unknown", "in_dict": False},
             ],
+            "certs": [],
             "position": "backend",
             "career_min": 3,
             "career_max": 5,
             "pool": "global",
+            "memo": None,
+            "is_primary": False,
         }
     finally:
         app.dependency_overrides.clear()
@@ -513,10 +562,13 @@ def test_update_resume_replaces_meta_and_skills_for_owner(monkeypatch) -> None:
                 {"canonical": "Kubernetes", "category": "devops", "in_dict": True},
                 {"canonical": "NewTool", "category": "unknown", "in_dict": False},
             ],
+            "certs": [],
             "position": "backend",
             "career_min": 4,
             "career_max": 6,
             "pool": "global",
+            "memo": None,
+            "is_primary": False,
         }
 
         with testing_session() as session:
@@ -617,8 +669,8 @@ def test_get_resume_list_returns_owned_active_resume_summaries(monkeypatch) -> N
         assert response.status_code == 200
         assert response.json() == {
             "items": [
-                {"resume_id": 2, "title": "Data resume", "position": "data"},
-                {"resume_id": 1, "title": "Backend resume v1", "position": "backend"},
+                {"resume_id": 2, "title": "Data resume", "position": "data", "is_primary": False},
+                {"resume_id": 1, "title": "Backend resume v1", "position": "backend", "is_primary": False},
             ]
         }
     finally:
@@ -955,3 +1007,139 @@ def test_resume_primary_unique_index_rejects_second_primary_per_user() -> None:
         )
         with pytest.raises(IntegrityError):
             session.commit()
+
+    # Verify that multiple non-primary resumes per user are still allowed
+    # (this ensures the index is truly partial, not a full unique on user_id)
+    with testing_session() as assertion_session:
+        user = assertion_session.query(User).filter_by(email="primary@example.com").one()
+        assertion_session.add(
+            Resume(
+                user_id=user.id, title="C", position="backend",
+                career_min=0, career_max=1, pool="domestic", is_primary=False,
+            )
+        )
+        assertion_session.commit()  # Should succeed without IntegrityError
+
+
+def test_set_primary_resume_switches_flag_and_returns_updated_list(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(email="setprimary@example.com", password_hash="unused")
+        seed.add(user)
+        seed.flush()
+        first = Resume(
+            user_id=user.id, title="First", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=True,
+        )
+        second = Resume(
+            user_id=user.id, title="Second", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=False,
+        )
+        seed.add_all([first, second])
+        seed.commit()
+        user_id = user.id
+        first_id, second_id = first.resume_id, second.resume_id
+
+    def override_get_session():
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(
+            f"/api/v1/resume/{second_id}/primary",
+            headers={"Authorization": f"Bearer {create_access_token(user_id)}"},
+        )
+
+        assert response.status_code == 200
+        items = {item["resume_id"]: item["is_primary"] for item in response.json()["items"]}
+        assert items[first_id] is False
+        assert items[second_id] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_primary_resume_promotes_most_recently_updated_remaining(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(email="deleteprimary@example.com", password_hash="unused")
+        seed.add(user)
+        seed.flush()
+        primary = Resume(
+            user_id=user.id, title="Primary", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=True,
+        )
+        other = Resume(
+            user_id=user.id, title="Other", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=False,
+        )
+        seed.add_all([primary, other])
+        seed.commit()
+        user_id = user.id
+        primary_id, other_id = primary.resume_id, other.resume_id
+
+    def override_get_session():
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.delete(
+            f"/api/v1/resume/{primary_id}",
+            headers={"Authorization": f"Bearer {create_access_token(user_id)}"},
+        )
+        assert response.status_code == 204
+
+        with testing_session() as session:
+            remaining = session.get(Resume, other_id)
+            assert remaining.is_primary is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_generate_resume_feedback_includes_memo_in_prompt(monkeypatch) -> None:
+    from app.services import resume_feedback
+
+    captured_prompts = []
+
+    def fake_generate_with_gemini(*, skills, position, market_skills, memo=None):
+        captured_prompts.append(
+            resume_feedback._build_prompt(
+                skills=skills, position=position, market_skills=market_skills, memo=memo
+            )
+        )
+        return (["feedback"], ["question"])
+
+    monkeypatch.setattr(resume_feedback, "_generate_with_gemini", fake_generate_with_gemini)
+    monkeypatch.setattr(resume_feedback, "_get_market_demand_skills", lambda **kwargs: ["Docker"])
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as session:
+        resume_feedback.generate_resume_feedback(
+            skills=[{"canonical": "Python", "category": "language", "in_dict": True}],
+            position="backend",
+            session=session,
+            pool="domestic",
+            memo="3년차 백엔드, 대용량 트래픽 프로젝트 경험 위주로 봐주세요.",
+        )
+
+    assert "3년차 백엔드" in captured_prompts[0]
