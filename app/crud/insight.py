@@ -4,13 +4,14 @@
 GitHub 레포 단위 데이터(l,t,u)는 별도 테이블이 필요해 여기 포함하지 않는다.
 """
 
-from datetime import date
+import statistics
+from datetime import date, timedelta
 
 from sqlalchemy import case, distinct, func, select, text
 from sqlalchemy.orm import Session
 
 from app.models import InterestSignal, JobCategory, Posting, PostingCategory, PostingTech, Skill
-from app.services.match import get_skill_id_by_canonical
+from app.services.match import build_posting_pool_query, get_skill_id_by_canonical
 
 
 def _quarter_of(d: date) -> str:
@@ -473,3 +474,286 @@ def get_cooccurrence(
         )
 
     return list(nodes.values()), links
+
+
+def get_posting_timeline(
+    session: Session, *, pool: str, days: int, owned_skill_ids: set[int] | None
+) -> tuple[list[dict], str]:
+    """풀 내 최신 공고 일별 타임라인. owned_skill_ids가 주어지면 겹치는 공고 수도 함께 집계한다."""
+    as_of_date = session.scalar(
+        select(func.max(Posting.post_date)).where(Posting.pool == pool, Posting.is_deleted.is_(False))
+    )
+    if as_of_date is None:
+        return [], date.today().isoformat()
+
+    start_date = as_of_date - timedelta(days=days - 1)
+
+    rows = session.execute(
+        select(Posting.id, Posting.post_date).where(
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            Posting.post_date.isnot(None),
+            Posting.post_date >= start_date,
+            Posting.post_date <= as_of_date,
+        )
+    ).all()
+
+    totals: dict[date, int] = {}
+    posting_dates: dict[int, date] = {}
+    for posting_id, post_date in rows:
+        totals[post_date] = totals.get(post_date, 0) + 1
+        posting_dates[posting_id] = post_date
+
+    matched_by_date: dict[date, int] | None = None
+    if owned_skill_ids is not None:
+        matched_by_date = dict.fromkeys(totals, 0)
+        if owned_skill_ids and posting_dates:
+            skill_rows = session.execute(
+                select(PostingTech.posting_id, PostingTech.skill_id).where(
+                    PostingTech.posting_id.in_(posting_dates.keys()),
+                    PostingTech.is_deleted.is_(False),
+                )
+            ).all()
+            posting_skills: dict[int, set[int]] = {}
+            for posting_id, skill_id in skill_rows:
+                posting_skills.setdefault(posting_id, set()).add(skill_id)
+            for posting_id, skills in posting_skills.items():
+                if skills & owned_skill_ids:
+                    d = posting_dates[posting_id]
+                    matched_by_date[d] = matched_by_date.get(d, 0) + 1
+
+    daily = []
+    cursor = start_date
+    while cursor <= as_of_date:
+        entry: dict = {"date": cursor.isoformat(), "total": totals.get(cursor, 0)}
+        if matched_by_date is not None:
+            entry["matched"] = matched_by_date.get(cursor, 0)
+        daily.append(entry)
+        cursor += timedelta(days=1)
+
+    return daily, as_of_date.isoformat()
+
+
+def get_response_rate(session: Session, *, pool: str, company_limit: int = 20) -> dict:
+    """응답률 분포(20포인트 폭 5버킷) + 회사별 평균 응답률. wanted 소스만 response_rate를 적재하므로 표본이 얇다."""
+    rows = session.execute(
+        select(Posting.company, Posting.response_rate).where(
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            Posting.response_rate.isnot(None),
+        )
+    ).all()
+
+    rates = [float(r.response_rate) for r in rows]
+    sample_size = len(rates)
+    if sample_size == 0:
+        return {"median_rate": 0.0, "levels": [], "companies": [], "sample_size": 0}
+
+    median_rate = round(statistics.median(rates), 1)
+
+    bucket_width = 20
+    level_labels = [f"{i}-{i + bucket_width}" for i in range(0, 100, bucket_width)]
+    level_counts: dict[str, int] = dict.fromkeys(level_labels, 0)
+    for rate in rates:
+        idx = min(int(rate // bucket_width), len(level_labels) - 1)
+        level_counts[level_labels[idx]] += 1
+    levels = [{"level": label, "n": level_counts[label]} for label in level_labels]
+
+    company_rates: dict[str, list[float]] = {}
+    for company, rate in rows:
+        if company is None:
+            continue
+        company_rates.setdefault(company, []).append(float(rate))
+
+    companies = [
+        {"company": company, "rate": round(sum(vals) / len(vals), 1), "n": len(vals)}
+        for company, vals in company_rates.items()
+    ]
+    companies.sort(key=lambda c: c["rate"], reverse=True)
+
+    return {
+        "median_rate": median_rate,
+        "levels": levels,
+        "companies": companies[:company_limit],
+        "sample_size": sample_size,
+    }
+
+
+def get_skill_trend_yearly(session: Session, *, pool: str, top_k: int = 15, movers_limit: int = 5) -> dict:
+    """연도별 기술 점유율(연도 내 posting_tech 빈도 / 그 연도 전체 공고 수) + 급상승/급하락 무버스."""
+    rows = session.execute(
+        select(Posting.post_date, Skill.canonical)
+        .select_from(Posting)
+        .join(PostingTech, PostingTech.posting_id == Posting.id)
+        .join(Skill, Skill.id == PostingTech.skill_id)
+        .where(
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            Posting.post_date.isnot(None),
+            PostingTech.is_deleted.is_(False),
+            Skill.is_deleted.is_(False),
+        )
+    ).all()
+
+    skill_year_count: dict[str, dict[int, int]] = {}
+    skill_total: dict[str, int] = {}
+    for post_date, canonical in rows:
+        year = post_date.year
+        year_counts = skill_year_count.setdefault(canonical, {})
+        year_counts[year] = year_counts.get(year, 0) + 1
+        skill_total[canonical] = skill_total.get(canonical, 0) + 1
+
+    year_posting_rows = session.execute(
+        select(Posting.post_date).where(
+            Posting.pool == pool, Posting.is_deleted.is_(False), Posting.post_date.isnot(None)
+        )
+    ).all()
+    year_denominator: dict[int, int] = {}
+    for (post_date,) in year_posting_rows:
+        year_denominator[post_date.year] = year_denominator.get(post_date.year, 0) + 1
+
+    years = sorted(year_denominator.keys())
+
+    top_skills = sorted(skill_total.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
+
+    series = []
+    for canonical, _total in top_skills:
+        year_counts = skill_year_count.get(canonical, {})
+        shares = []
+        for year in years:
+            denom = year_denominator.get(year, 0)
+            n = year_counts.get(year, 0)
+            shares.append(round(n / denom * 100, 1) if denom else 0.0)
+        delta = round(shares[-1] - shares[0], 1) if shares else 0.0
+        series.append({"canonical": canonical, "shares": shares, "delta": delta})
+
+    rising = sorted((s for s in series if s["delta"] > 0), key=lambda s: s["delta"], reverse=True)[:movers_limit]
+    falling = sorted((s for s in series if s["delta"] < 0), key=lambda s: s["delta"])[:movers_limit]
+
+    return {
+        "years": years,
+        "series": series,
+        "movers": {
+            "rising": [{"canonical": s["canonical"], "delta": s["delta"]} for s in rising],
+            "falling": [{"canonical": s["canonical"], "delta": s["delta"]} for s in falling],
+        },
+        "sample_size": sum(year_denominator.values()),
+    }
+
+
+def get_hot_companies(session: Session, *, pool: str, days: int = 30, limit: int = 20) -> tuple[list[dict], str]:
+    """최근 days일간(as_of=풀 내 최신 post_date 기준) 신규 공고가 많은 활발 기업."""
+    as_of_date = session.scalar(
+        select(func.max(Posting.post_date)).where(Posting.pool == pool, Posting.is_deleted.is_(False))
+    )
+    if as_of_date is None:
+        return [], date.today().isoformat()
+
+    start_date = as_of_date - timedelta(days=days - 1)
+
+    rows = session.execute(
+        select(Posting.company, func.count().label("n"))
+        .where(
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            Posting.company.isnot(None),
+            Posting.post_date.isnot(None),
+            Posting.post_date >= start_date,
+            Posting.post_date <= as_of_date,
+        )
+        .group_by(Posting.company)
+        .order_by(func.count().desc())
+        .limit(limit)
+    ).all()
+
+    items = [{"company": row.company, "posting_count": row.n} for row in rows]
+    return items, as_of_date.isoformat()
+
+
+def get_region_density(session: Session, *, pool: str = "domestic", limit: int = 20) -> tuple[list[dict], str]:
+    """지역(구/동)별 공고 밀도. region_district는 domestic 공고에만 적재됨."""
+    as_of_date = session.scalar(
+        select(func.max(Posting.post_date)).where(Posting.pool == pool, Posting.is_deleted.is_(False))
+    )
+
+    rows = session.execute(
+        select(Posting.region_district, func.count().label("n"))
+        .where(
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            Posting.region_district.isnot(None),
+        )
+        .group_by(Posting.region_district)
+        .order_by(func.count().desc())
+        .limit(limit)
+    ).all()
+
+    items = [{"region_district": row.region_district, "posting_count": row.n} for row in rows]
+    return items, as_of_date.isoformat() if as_of_date is not None else date.today().isoformat()
+
+
+def get_skill_unlock(
+    session: Session,
+    *,
+    pool: str,
+    owned_skill_ids: set[int],
+    position: str | None = None,
+    candidate_limit: int = 15,
+) -> dict:
+    """한계 해금 — 기술 하나를 더 배우면 지원 가능(apply)해지는 공고가 얼마나 늘어나는지.
+
+    missing = 공고 요구기술 - 보유기술. missing_count로 apply(0)/near1(1)/near2_3(2~3)/far(4+) 4단계 퍼널을 만들고,
+    near1 공고의 유일한 미보유 기술을 marginal_apply로, 전체 미보유 상태에서 요구되는 횟수를 req_count로 집계한다.
+    """
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+
+    rows = session.execute(
+        select(PostingTech.posting_id, PostingTech.skill_id, Skill.canonical)
+        .join(posting_pool_query, posting_pool_query.c.id == PostingTech.posting_id)
+        .join(Skill, Skill.id == PostingTech.skill_id)
+        .where(PostingTech.is_deleted.is_(False), Skill.is_deleted.is_(False))
+    ).all()
+
+    posting_skills: dict[int, set[int]] = {}
+    skill_canonical: dict[int, str] = {}
+    for posting_id, skill_id, canonical in rows:
+        posting_skills.setdefault(posting_id, set()).add(skill_id)
+        skill_canonical[skill_id] = canonical
+
+    funnel = {"apply": 0, "near1": 0, "near2_3": 0, "far": 0}
+    req_count: dict[int, int] = {}
+    marginal_apply: dict[int, int] = {}
+
+    for skills in posting_skills.values():
+        missing = skills - owned_skill_ids
+        missing_count = len(missing)
+        if missing_count == 0:
+            funnel["apply"] += 1
+            continue
+        if missing_count == 1:
+            funnel["near1"] += 1
+            (only_id,) = tuple(missing)
+            marginal_apply[only_id] = marginal_apply.get(only_id, 0) + 1
+        elif missing_count <= 3:
+            funnel["near2_3"] += 1
+        else:
+            funnel["far"] += 1
+
+        for skill_id in missing:
+            req_count[skill_id] = req_count.get(skill_id, 0) + 1
+
+    candidates = [
+        {
+            "canonical": skill_canonical[skill_id],
+            "req_count": count,
+            "marginal_apply": marginal_apply.get(skill_id, 0),
+        }
+        for skill_id, count in req_count.items()
+    ]
+    candidates.sort(key=lambda c: (c["marginal_apply"], c["req_count"]), reverse=True)
+
+    return {
+        "funnel": funnel,
+        "candidates": candidates[:candidate_limit],
+        "sample_size": len(posting_skills),
+    }

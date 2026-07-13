@@ -147,3 +147,116 @@ class CooccurrenceResponse(BaseModel):
     nodes: list[CoocNode]
     links: list[CoocLink]
     as_of: str
+
+
+class PostingTimelineDay(BaseModel):
+    date: str
+    total: int
+    matched: int | None = None
+
+
+class PostingTimelineResponse(BaseModel):
+    """최신 공고 타임라인(일별 건수). resume_id/session_id 지정 시 보유기술과 겹치는 공고 수도 함께 반환."""
+
+    daily: list[PostingTimelineDay]
+    as_of: str
+
+
+class ResponseRateLevel(BaseModel):
+    level: str  # "0-20" 등 20포인트 폭 버킷
+    n: int
+
+
+class ResponseRateCompany(BaseModel):
+    company: str
+    rate: float
+    n: int
+
+
+class ResponseRateResponse(BaseModel):
+    """응답률 분포 + 회사별 응답률. posting.response_rate가 있는 공고만(현재 wanted 소스만 적재)."""
+
+    pool: Literal["global", "domestic"]
+    median_rate: float
+    levels: list[ResponseRateLevel]
+    companies: list[ResponseRateCompany]
+    as_of: str
+    sample_size: int
+
+
+class SkillTrendYearlySeries(BaseModel):
+    canonical: str
+    shares: list[float]  # years와 동일 길이, 연도별 점유율(%)
+    delta: float  # 마지막 연도 - 첫 연도
+
+
+class SkillTrendMover(BaseModel):
+    canonical: str
+    delta: float
+
+
+class SkillTrendMovers(BaseModel):
+    rising: list[SkillTrendMover]
+    falling: list[SkillTrendMover]
+
+
+class SkillTrendYearlyResponse(BaseModel):
+    """연도별 기술 점유율 추이 + 무버스(급상승/급하락)."""
+
+    pool: Literal["global", "domestic"]
+    years: list[int]
+    series: list[SkillTrendYearlySeries]
+    movers: SkillTrendMovers
+    as_of: str
+    sample_size: int
+
+
+class HotCompanyItem(BaseModel):
+    company: str
+    posting_count: int
+
+
+class HotCompaniesResponse(BaseModel):
+    """최근 N일간 신규 공고가 많은 활발 기업."""
+
+    pool: Literal["global", "domestic"]
+    days: int
+    items: list[HotCompanyItem]
+    as_of: str
+
+
+class RegionDensityItem(BaseModel):
+    region_district: str
+    posting_count: int
+
+
+class RegionDensityResponse(BaseModel):
+    """지역(구/동)별 공고 밀도. region_district는 domestic 공고에만 적재됨."""
+
+    pool: Literal["global", "domestic"]
+    items: list[RegionDensityItem]
+    as_of: str
+
+
+class SkillUnlockFunnel(BaseModel):
+    apply: int  # 미보유 기술 0개(바로 지원 가능)
+    near1: int  # 미보유 기술 1개
+    near2_3: int  # 미보유 기술 2~3개
+    far: int  # 미보유 기술 4개 이상
+
+
+class SkillUnlockCandidate(BaseModel):
+    canonical: str
+    req_count: int  # 이 기술을 요구하면서 아직 apply 단계가 아닌 공고 수
+    marginal_apply: int  # 이 기술 하나만 추가하면 apply로 넘어가는 공고 수(near1 중 유일한 미보유 기술)
+
+
+class SkillUnlockResponse(BaseModel):
+    """한계 해금 — 기술 하나를 더 배우면 지원 가능해지는 공고가 얼마나 늘어나는지."""
+
+    pool: Literal["global", "domestic"]
+    funnel: SkillUnlockFunnel
+    candidates: list[SkillUnlockCandidate]
+    as_of: str
+    sample_size: int
+    sample_warning: bool | None = None
