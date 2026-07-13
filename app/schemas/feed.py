@@ -24,6 +24,7 @@ class FeedPostingItem(BaseModel):
     certs: list[str]
     seniority: str | None
     description_snippet: str | None
+    logo_url: str | None
     url: str
     career_min: int | None
     career_max: int | None
