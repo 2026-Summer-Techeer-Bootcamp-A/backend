@@ -57,6 +57,10 @@ class Posting(TimestampMixin, SoftDeleteMixin, Base):
     lng: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     industry: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_rate: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    # 원본 수집 데이터에서 뽑아 백필한 필드(scripts/enrich_postings.py). logo_url은 평문 URL,
+    # description은 [{"title":..,"text":..}] JSON 문자열(섹션 없는 소스는 단일 섹션).
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     raw_postings: Mapped[list["RawPosting"]] = relationship(back_populates="posting")
     techs: Mapped[list["PostingTech"]] = relationship(back_populates="posting")
