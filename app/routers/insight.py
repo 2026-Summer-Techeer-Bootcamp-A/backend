@@ -6,28 +6,41 @@
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 
 from app.core.deps import SessionDep
 from app.crud.insight import (
     get_cooccurrence,
     get_global_domestic_gap,
     get_hiring_season,
+    get_hot_companies,
     get_hype_vs_hire,
     get_industry_fingerprint,
     get_newcomer_gate,
+    get_posting_timeline,
+    get_region_density,
+    get_response_rate,
     get_role_stack_fit,
     get_skill_share,
+    get_skill_trend_yearly,
+    get_skill_unlock,
 )
+from app.routers.match import resolve_optional_owned_skill_ids, resolve_owned_skill_ids
 from app.schemas.insight import (
     CooccurrenceResponse,
     GlobalDomesticGapResponse,
     HiringSeasonResponse,
+    HotCompaniesResponse,
     HypeVsHireResponse,
     IndustryFingerprintResponse,
     NewcomerGateResponse,
+    PostingTimelineResponse,
+    RegionDensityResponse,
+    ResponseRateResponse,
     RoleStackFitResponse,
     SkillShareResponse,
+    SkillTrendYearlyResponse,
+    SkillUnlockResponse,
 )
 from app.schemas.posting import Pool
 
@@ -161,4 +174,107 @@ def stats_cooccurrence(
         nodes=nodes,
         links=links,
         as_of=date.today().isoformat(),
+    )
+
+
+@router.get(
+    "/stats/posting-timeline",
+    response_model=PostingTimelineResponse,
+    response_model_exclude_none=True,
+)
+def stats_posting_timeline(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    days: Annotated[int, Query(ge=1, le=90, description="집계 일수")] = 36,
+    resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
+    session_id: Annotated[str | None, Query(description="비로그인 분석 세션 ID")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> PostingTimelineResponse:
+    """최신 공고 일별 타임라인. resume_id/session_id 지정 시 보유기술과 1개 이상 겹치는 공고 수도 반환."""
+    owned_skill_ids = resolve_optional_owned_skill_ids(session, resume_id, session_id, authorization)
+    daily, as_of = get_posting_timeline(session=session, pool=pool, days=days, owned_skill_ids=owned_skill_ids)
+    return PostingTimelineResponse(daily=daily, as_of=as_of)
+
+
+@router.get("/stats/response-rate", response_model=ResponseRateResponse)
+def stats_response_rate(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
+) -> ResponseRateResponse:
+    """응답률 분포(20포인트 폭 5버킷) + 회사별 평균 응답률. response_rate는 wanted 소스만 적재됨."""
+    result = get_response_rate(session=session, pool=pool)
+    return ResponseRateResponse(
+        pool=pool,
+        median_rate=result["median_rate"],
+        levels=result["levels"],
+        companies=result["companies"],
+        as_of=date.today().isoformat(),
+        sample_size=result["sample_size"],
+    )
+
+
+@router.get("/stats/skill-trend-yearly", response_model=SkillTrendYearlyResponse)
+def stats_skill_trend_yearly(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    top_k: Annotated[int, Query(ge=1, le=50, description="추적할 상위 기술 수")] = 15,
+) -> SkillTrendYearlyResponse:
+    """연도별 기술 점유율 추이 + 급상승/급하락 무버스."""
+    result = get_skill_trend_yearly(session=session, pool=pool, top_k=top_k)
+    return SkillTrendYearlyResponse(
+        pool=pool,
+        years=result["years"],
+        series=result["series"],
+        movers=result["movers"],
+        as_of=date.today().isoformat(),
+        sample_size=result["sample_size"],
+    )
+
+
+@router.get("/stats/hot-companies", response_model=HotCompaniesResponse)
+def stats_hot_companies(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    days: Annotated[int, Query(ge=1, le=90, description="집계 일수")] = 30,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> HotCompaniesResponse:
+    """최근 days일간(풀 내 최신 공고일 기준) 신규 공고가 많은 활발 기업."""
+    items, as_of = get_hot_companies(session=session, pool=pool, days=days, limit=limit)
+    return HotCompaniesResponse(pool=pool, days=days, items=items, as_of=as_of)
+
+
+@router.get("/stats/region-density", response_model=RegionDensityResponse)
+def stats_region_density(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> RegionDensityResponse:
+    """지역(구/동)별 공고 밀도. region_district는 domestic 공고에만 적재됨."""
+    items, as_of = get_region_density(session=session, pool=pool, limit=limit)
+    return RegionDensityResponse(pool=pool, items=items, as_of=as_of)
+
+
+@router.get(
+    "/stats/skill-unlock",
+    response_model=SkillUnlockResponse,
+    response_model_exclude_none=True,
+)
+def stats_skill_unlock(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
+    session_id: Annotated[str | None, Query(description="비로그인 분석 세션 ID")] = None,
+    position: Annotated[str | None, Query(description="직무 필터")] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> SkillUnlockResponse:
+    """한계 해금 — 기술 하나를 더 배우면 지원 가능(apply)해지는 공고가 얼마나 늘어나는지."""
+    owned_skill_ids = resolve_owned_skill_ids(session, resume_id, session_id, authorization)
+    result = get_skill_unlock(session=session, pool=pool, owned_skill_ids=owned_skill_ids, position=position)
+    return SkillUnlockResponse(
+        pool=pool,
+        funnel=result["funnel"],
+        candidates=result["candidates"],
+        as_of=date.today().isoformat(),
+        sample_size=result["sample_size"],
+        sample_warning=True if result["sample_size"] < 50 else None,
     )
