@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
@@ -260,3 +260,103 @@ def _extract_url(payload: dict) -> str:
             return value
 
     return ""
+
+
+def _get_posting_or_404(session: Session, posting_id: int) -> Posting:
+    posting = session.execute(
+        select(Posting).where(Posting.id == posting_id, Posting.is_deleted.is_(False))
+    ).scalar_one_or_none()
+    if posting is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="posting not found")
+    return posting
+
+
+def _build_cards(session: Session, postings: list[Posting]) -> list[dict]:
+    posting_ids = [p.id for p in postings]
+    skill_map, _skill_id_map = _get_posting_skills(session, posting_ids)
+    url_map = _get_posting_urls(session, posting_ids)
+
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "company": p.company,
+            "post_date": p.post_date,
+            "close_date": p.close_date,
+            "skills": skill_map.get(p.id, []),
+            "url": url_map.get(p.id, ""),
+        }
+        for p in postings
+    ]
+
+
+def get_nearby_postings(session: Session, *, posting_id: int, limit: int = 10) -> list[dict]:
+    """자기 자신을 제외한, 같은 region_district의 최신 공고."""
+    posting = _get_posting_or_404(session, posting_id)
+
+    if posting.region_district is None:
+        return []
+
+    rows = (
+        session.execute(
+            select(Posting)
+            .where(
+                Posting.id != posting_id,
+                Posting.region_district == posting.region_district,
+                Posting.is_deleted.is_(False),
+            )
+            .order_by(Posting.post_date.is_(None), Posting.post_date.desc(), Posting.id.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .unique()
+        .all()
+    )
+
+    return _build_cards(session, list(rows))
+
+
+def get_similar_postings(session: Session, *, posting_id: int, limit: int = 10) -> list[dict]:
+    """자기 자신을 제외한, 요구 기술 겹침(overlap_count)이 많은 순 공고."""
+    _get_posting_or_404(session, posting_id)
+
+    skill_ids = list(
+        session.scalars(
+            select(PostingTech.skill_id).where(
+                PostingTech.posting_id == posting_id,
+                PostingTech.is_deleted.is_(False),
+            )
+        ).all()
+    )
+    if not skill_ids:
+        return []
+
+    overlap_rows = session.execute(
+        select(PostingTech.posting_id, func.count(distinct(PostingTech.skill_id)).label("overlap"))
+        .where(
+            PostingTech.skill_id.in_(skill_ids),
+            PostingTech.posting_id != posting_id,
+            PostingTech.is_deleted.is_(False),
+        )
+        .group_by(PostingTech.posting_id)
+        .order_by(func.count(distinct(PostingTech.skill_id)).desc())
+        .limit(limit)
+    ).all()
+
+    overlap_map = {row.posting_id: row.overlap for row in overlap_rows}
+    if not overlap_map:
+        return []
+
+    postings = (
+        session.execute(select(Posting).where(Posting.id.in_(overlap_map.keys()), Posting.is_deleted.is_(False)))
+        .scalars()
+        .unique()
+        .all()
+    )
+
+    cards = _build_cards(session, list(postings))
+    for card in cards:
+        card["overlap_count"] = overlap_map[card["id"]]
+    cards.sort(key=lambda c: c["overlap_count"], reverse=True)
+
+    return cards
