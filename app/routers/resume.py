@@ -80,6 +80,7 @@ def create_resume_feedback(
         position=payload.position,
         session=session,
         pool=confirmed.get("pool"),
+        memo=confirmed.get("memo"),
     )
 
 
