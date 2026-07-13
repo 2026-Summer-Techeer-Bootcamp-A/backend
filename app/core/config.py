@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
 
+    # RAG vector_tool 활성화 플래그. 기본 off.
+    # 쿼리 임베딩(BGE-M3 CPU 추론)은 RAM 2~3GB를 쓰므로, 메모리 여유가 있는 인스턴스에서만 켠다.
+    # off면 vector_tool이 None을 반환해 라우터가 sql/graph로 폴백한다(정직성 유지).
+    enable_vector_search: bool = False
+
     # TODO: consumed by the future OTel trace exporter configuration.
     otel_exporter_otlp_endpoint: str = "http://tempo:4317"
     otel_service_name: str = "career-backend"

@@ -19,10 +19,12 @@ INTENT_TOOLS = {
     "skill_ranking": ["sql"],
     "concept_ranking": ["sql"],
     "cert_ranking": ["sql"],
+    "semantic_search": ["vector"],
     "overview": ["sql"],
 }
 
-_COOCCUR_KW = ("같이", "함께", "동반", "관련", "궁합", "짝", "with", "together", "pair", "combo")
+_COOCCUR_KW = ("같이", "함께", "동반", "궁합", "짝", "with", "together", "pair", "combo")
+_SEMANTIC_KW = ("찾아", "추천", "비슷", "유사", "관련 공고", "같은 공고", "어떤 공고", "공고 있", "recommend", "similar")
 _CONCEPT_KW = ("개념", "패러다임", "트렌드", "msa", "마이크로서비스", "생성형", "대규모", "아키텍처", "devops", "ci/cd")
 _CERT_KW = ("자격증", "자격", "cert", "토익", "정보처리")
 _RANK_KW = ("순위", "많이", "상위", "top", "인기", "가장", "수요")
@@ -31,13 +33,16 @@ _PLANNER_SYSTEM = (
     "You are a query planner for a Korean job-market RAG. "
     "Classify the user question into exactly one intent and extract entities. "
     "Return ONLY JSON: {\"intent\": one of "
-    "[cooccurrence, skill_demand, skill_ranking, concept_ranking, cert_ranking, overview], "
+    "[cooccurrence, skill_demand, skill_ranking, concept_ranking, cert_ranking, "
+    "semantic_search, overview], "
     "\"skill\": <a single tech name mentioned or null>, "
     "\"pool\": <domestic|global|null>}. "
     "cooccurrence = which techs go together with X. "
     "skill_demand = how many postings want X. "
     "skill_ranking = most demanded techs. concept_ranking = paradigms/concepts. "
-    "cert_ranking = certifications. overview = general market summary."
+    "cert_ranking = certifications. "
+    "semantic_search = find/recommend postings similar to a free-form description. "
+    "overview = general market summary."
 )
 
 
@@ -59,6 +64,8 @@ def _heuristic(session: Session, q: str, pool: str | None) -> Plan:
     skill = _detect_skill(session, q)
     if skill and any(k in low for k in _COOCCUR_KW):
         intent = "cooccurrence"
+    elif any(k in q for k in _SEMANTIC_KW):
+        intent = "semantic_search"
     elif any(k in low for k in _CERT_KW):
         intent = "cert_ranking"
     elif any(k in low for k in _CONCEPT_KW):
