@@ -61,6 +61,9 @@ def client() -> Iterator[TestClient]:
             region_city="서울",
             post_date=today,
             close_date=today + timedelta(days=10),
+            career_min=3,
+            career_max=7,
+            response_rate=82.5,
         )
         p2 = Posting(
             source="wanted",
@@ -116,6 +119,14 @@ def test_feed_anonymous_returns_cards_without_match(client):
     assert first["categories"] == ["백엔드"]
     assert sorted(first["skills"]) == ["aws", "python"]
     assert first["match"] is None
+    assert first["career_min"] == 3
+    assert first["career_max"] == 7
+    assert first["response_rate"] == 82.5
+
+    second = body["items"][1]  # p2: career_min/max/response_rate 미지정
+    assert second["career_min"] is None
+    assert second["career_max"] is None
+    assert second["response_rate"] is None
 
 
 def test_feed_authed_includes_match(client, monkeypatch):

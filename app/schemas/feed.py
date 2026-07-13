@@ -21,6 +21,9 @@ class FeedPostingItem(BaseModel):
     categories: list[str]
     skills: list[str]
     url: str
+    career_min: int | None
+    career_max: int | None
+    response_rate: float | None
     match: FeedMatch | None = None
 
 
