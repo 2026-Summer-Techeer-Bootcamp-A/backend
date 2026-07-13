@@ -9,10 +9,16 @@ class ParsedSkill(BaseModel):
     in_dict: bool
 
 
+class ParsedCert(BaseModel):
+    name: str
+    in_dict: bool
+
+
 class ResumeParseResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     skills: list[ParsedSkill]
+    certs: list[ParsedCert] = Field(default_factory=list)
     position: str | None = None
     career_min: int | None = None
     career_max: int | None = None
@@ -24,6 +30,7 @@ class ResumeConfirmRequest(BaseModel):
     career_min: int | None = Field(default=None, ge=0)
     career_max: int | None = Field(default=None, ge=0)
     pool: Literal["global", "domestic"]
+    memo: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_career_range(self) -> "ResumeConfirmRequest":
@@ -56,10 +63,12 @@ class ResumeFeedbackResponse(BaseModel):
 class ResumeCreateRequest(BaseModel):
     title: str = Field(min_length=1)
     skills: list[ParsedSkill] = Field(min_length=1)
+    certs: list[ParsedCert] = Field(default_factory=list)
     position: str = Field(min_length=1)
     career_min: int = Field(ge=0)
     career_max: int = Field(ge=0)
     pool: Literal["global", "domestic"]
+    memo: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_career_range(self) -> "ResumeCreateRequest":
@@ -84,6 +93,7 @@ class ResumeListItem(BaseModel):
     resume_id: int
     title: str
     position: str | None
+    is_primary: bool
 
 
 class ResumeListResponse(BaseModel):
@@ -94,7 +104,10 @@ class ResumeDetailResponse(BaseModel):
     resume_id: int
     title: str
     skills: list[ParsedSkill]
+    certs: list[ParsedCert]
     position: str
     career_min: int
     career_max: int
     pool: Literal["global", "domestic"]
+    memo: str | None
+    is_primary: bool
