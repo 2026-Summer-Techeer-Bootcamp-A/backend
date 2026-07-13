@@ -1,8 +1,9 @@
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Resume, ResumeCert, ResumeSkill, Skill
+from app.models import Cert, Resume, ResumeCert, ResumeSkill, Skill
 from app.schemas.resume import (
+    ParsedCert,
     ParsedSkill,
     ResumeCreateRequest,
     ResumeDetailResponse,
@@ -17,6 +18,12 @@ def create_resume(
     user_id: int,
     resume_in: ResumeCreateRequest,
 ) -> Resume:
+    has_existing = session.scalar(
+        select(func.count()).select_from(Resume).where(
+            Resume.user_id == user_id,
+            Resume.is_deleted.is_(False),
+        )
+    )
     resume = Resume(
         user_id=user_id,
         title=resume_in.title,
@@ -24,11 +31,14 @@ def create_resume(
         career_min=resume_in.career_min,
         career_max=resume_in.career_max,
         pool=resume_in.pool,
+        memo=resume_in.memo,
+        is_primary=has_existing == 0,
     )
     session.add(resume)
     session.flush()
 
     _add_resume_skills(session, resume_id=resume.resume_id, skills=resume_in.skills)
+    _add_resume_certs(session, resume_id=resume.resume_id, certs=resume_in.certs)
 
     session.commit()
     session.refresh(resume)
@@ -57,6 +67,7 @@ def update_resume(
     resume.career_min = resume_in.career_min
     resume.career_max = resume_in.career_max
     resume.pool = resume_in.pool
+    resume.memo = resume_in.memo
 
     session.execute(
         update(ResumeSkill)
@@ -67,6 +78,16 @@ def update_resume(
         .values(is_deleted=True, deleted_at=func.now())
     )
     _add_resume_skills(session, resume_id=resume.resume_id, skills=resume_in.skills)
+
+    session.execute(
+        update(ResumeCert)
+        .where(
+            ResumeCert.resume_id == resume.resume_id,
+            ResumeCert.is_deleted.is_(False),
+        )
+        .values(is_deleted=True, deleted_at=func.now())
+    )
+    _add_resume_certs(session, resume_id=resume.resume_id, certs=resume_in.certs)
 
     session.commit()
     session.refresh(resume)
@@ -117,7 +138,7 @@ def get_resume_list(
     user_id: int,
 ) -> list[ResumeListItem]:
     stmt = (
-        select(Resume.resume_id, Resume.title, Resume.position)
+        select(Resume.resume_id, Resume.title, Resume.position, Resume.is_primary)
         .where(
             Resume.user_id == user_id,
             Resume.is_deleted.is_(False),
@@ -129,8 +150,9 @@ def get_resume_list(
             resume_id=resume_id,
             title=title,
             position=position,
+            is_primary=is_primary,
         )
-        for resume_id, title, position in session.execute(stmt).all()
+        for resume_id, title, position, is_primary in session.execute(stmt).all()
     ]
 
 
@@ -164,14 +186,31 @@ def get_resume_detail(
         for resume_skill, skill in session.execute(stmt).all()
     ]
 
+    stmt_certs = (
+        select(ResumeCert, Cert)
+        .outerjoin(Cert, ResumeCert.cert_id == Cert.id)
+        .where(
+            ResumeCert.resume_id == resume.resume_id,
+            ResumeCert.is_deleted.is_(False),
+        )
+        .order_by(ResumeCert.id)
+    )
+    certs = [
+        _to_parsed_cert(resume_cert, cert)
+        for resume_cert, cert in session.execute(stmt_certs).all()
+    ]
+
     return ResumeDetailResponse(
         resume_id=resume.resume_id,
         title=resume.title,
         skills=skills,
+        certs=certs,
         position=resume.position,
         career_min=resume.career_min,
         career_max=resume.career_max,
         pool=resume.pool,
+        memo=resume.memo,
+        is_primary=resume.is_primary,
     )
 
 
@@ -222,3 +261,44 @@ def _to_parsed_skill(resume_skill: ResumeSkill, skill: Skill | None) -> ParsedSk
         category="unknown",
         in_dict=False,
     )
+
+
+def _get_certs_by_name(session: Session, names: set[str]) -> dict[str, Cert]:
+    if not names:
+        return {}
+
+    stmt = select(Cert).where(
+        Cert.name.in_(names),
+        Cert.is_deleted.is_(False),
+    )
+    return {cert.name: cert for cert in session.scalars(stmt).all()}
+
+
+def _add_resume_certs(
+    session: Session,
+    *,
+    resume_id: int,
+    certs: list[ParsedCert],
+) -> None:
+    certs_by_name = _get_certs_by_name(
+        session,
+        {cert.name for cert in certs if cert.in_dict},
+    )
+
+    for cert in certs:
+        dictionary_cert = certs_by_name.get(cert.name) if cert.in_dict else None
+        session.add(
+            ResumeCert(
+                resume_id=resume_id,
+                cert_id=dictionary_cert.id if dictionary_cert else None,
+                raw_label=None if dictionary_cert else cert.name,
+                is_out_of_dict=dictionary_cert is None,
+            )
+        )
+
+
+def _to_parsed_cert(resume_cert: ResumeCert, cert: Cert | None) -> ParsedCert:
+    if cert is not None and not cert.is_deleted:
+        return ParsedCert(name=cert.name, in_dict=True)
+
+    return ParsedCert(name=resume_cert.raw_label or "", in_dict=False)
