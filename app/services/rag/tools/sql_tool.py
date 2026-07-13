@@ -50,7 +50,11 @@ def top_skills(session: Session, pool: str | None = None, limit: int = 8) -> dic
     facts = "; ".join(f"{n} {c}건({round(100 * c / total, 1) if total else 0}%)" for n, c in rows)
     return {
         "tool_result": {"kind": "list", "label": "수요 상위 기술", "items": items},
-        "citation": {"type": "sql", "ref": "posting_tech", "label": f"기술태그 집계 · 공고 {total:,}건"},
+        "citation": {
+            "type": "sql",
+            "ref": "채용공고·기술 태그",
+            "label": f"기술태그 집계 · 공고 {total:,}건",
+        },
         "n": total,
         "facts": f"pool={pool or '전체'} 총 {total:,}건 기준 상위 기술 — {facts}",
     }
@@ -75,13 +79,18 @@ def top_concepts(session: Session, pool: str | None = None, limit: int = 8) -> d
     facts = "; ".join(f"{n} {c}건" for n, c in rows)
     return {
         "tool_result": {"kind": "list", "label": "빈출 개념·패러다임", "items": items},
-        "citation": {"type": "sql", "ref": "posting_concept", "label": f"개념 집계 · 공고 {total:,}건"},
+        "citation": {
+            "type": "sql",
+            "ref": "채용공고·개념",
+            "label": f"개념 집계 · 공고 {total:,}건",
+        },
         "n": total,
         "facts": f"pool={pool or '전체'} 상위 개념 — {facts}",
     }
 
 
 def top_certs(session: Session, pool: str | None = None, limit: int = 8) -> dict:
+    total = total_postings(session, pool)
     rows = _top(
         session,
         f"SELECT ct.name, COUNT(*) n FROM posting_cert pc "
@@ -92,13 +101,20 @@ def top_certs(session: Session, pool: str | None = None, limit: int = 8) -> dict
         pool,
         limit,
     )
-    items = [{"name": n, "metric": f"{c:,}건"} for n, c in rows]
-    n_total = sum(c for _, c in rows)
+    items = [
+        {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
+        for n, c in rows
+    ]
+    facts = "; ".join(f"{n} {c}건" for n, c in rows)
     return {
         "tool_result": {"kind": "list", "label": "요구 상위 자격증", "items": items},
-        "citation": {"type": "sql", "ref": "posting_cert", "label": "자격증 요구 집계"},
-        "n": n_total,
-        "facts": "상위 자격증 — " + "; ".join(f"{n} {c}건" for n, c in rows),
+        "citation": {
+            "type": "sql",
+            "ref": "채용공고·자격증",
+            "label": f"자격증 요구 집계 · 공고 {total:,}건",
+        },
+        "n": total,
+        "facts": f"pool={pool or '전체'} 총 {total:,}건 기준 상위 자격증 — {facts}",
     }
 
 
@@ -128,7 +144,11 @@ def skill_demand(session: Session, skill_name: str, pool: str | None = None) -> 
             "unit": "건",
             "items": [{"name": canonical, "metric": f"{n:,}건", "pct": pct}],
         },
-        "citation": {"type": "sql", "ref": f"skill/{canonical}", "label": f"{canonical} 요구 공고 {n:,}건"},
+        "citation": {
+            "type": "sql",
+            "ref": f"{canonical} 공고 매칭",
+            "label": f"{canonical} 요구 공고 {n:,}건",
+        },
         "n": n,
         "facts": f"{canonical}을(를) 요구하는 공고는 {n:,}건(pool={pool or '전체'} {total:,}건 중 {pct}%)",
     }

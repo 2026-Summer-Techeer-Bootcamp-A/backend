@@ -73,7 +73,7 @@ def co_occurring_skills(
         },
         "citation": {
             "type": "graph",
-            "ref": f"cooccur/{canonical}",
+            "ref": f"{canonical} 동반출현",
             "label": f"{canonical} 요구 공고 {base:,}건의 동반 기술",
         },
         "n": base,
