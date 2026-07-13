@@ -25,6 +25,7 @@ from app.routers.insight import router as insight_router
 from app.routers.github_insight import router as github_insight_router
 from app.routers.admin import router as admin_router
 from app.routers.search import router as search_router
+from app.routers.chat import router as chat_router
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
@@ -96,11 +97,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
 
-# 프론트(별도 Vercel 도메인)의 브라우저 요청 허용 — 없으면 프리플라이트 OPTIONS가 405로 막힘.
+# 프론트(Vercel) <-> 백엔드(GCP) 간 cross-origin 요청 허용.
+# Bearer 토큰 인증이라 쿠키가 없으므로 allow_credentials는 False로 충분하다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_allow_origins,
-    allow_credentials=True,
+    allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.cors_origin_regex,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -133,6 +136,7 @@ app.include_router(insight_router, prefix="/api/v1", tags=["insight"])
 app.include_router(github_insight_router, prefix="/api/v1", tags=["github-insight"])
 app.include_router(admin_router, prefix="/api/v1", tags=["admin"])
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
+app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 
 
 class PersonOut(BaseModel):
