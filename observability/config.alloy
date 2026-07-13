@@ -7,6 +7,28 @@ loki.source.file "system" {
   forward_to = [loki.write.default.receiver]
 }
 
+// 컨테이너(app, db, redis 등) 표준출력 로그를 수집한다. 알림이 터졌을 때
+// "그 시간의 로그"를 실제로 볼 수 있어야 알림이 조사에 쓸모가 있기 때문이다.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.write.default.receiver]
+}
+
 loki.write "default" {
   endpoint {
     url = "http://loki:3100/loki/api/v1/push"
