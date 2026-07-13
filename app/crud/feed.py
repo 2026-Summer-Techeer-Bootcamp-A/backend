@@ -213,44 +213,38 @@ def list_feed_postings(
     district: str | None = None,
     deadline_within_days: int | None = None,
     min_match: int | None = None,
+    sort: str = "latest",
+    skills: list[str] | None = None,
+    industry: str | None = None,
 ) -> tuple[list[FeedPostingItem], int]:
-    if min_match is None:
-        total = _count_filtered_postings(
-            session=session,
-            pool=pool,
-            position=category,
-            district=district,
-            deadline_within_days=deadline_within_days,
-        )
-        postings = _get_filtered_postings(
-            session=session,
-            pool=pool,
-            position=category,
-            sort="latest",
-            district=district,
-            deadline_within_days=deadline_within_days,
-            limit=page_size,
-            offset=(page - 1) * page_size,
-        )
-        return _build_feed_items(session, postings, owned_skill_ids), total
-
-    # min_match는 페이지를 정하기 전에 매치율을 계산해야 하므로 DB 레벨
-    # LIMIT/OFFSET을 쓸 수 없다. 필터된 공고 전체를 가져와 매치율로 거른 뒤
-    # 파이썬에서 페이지를 자른다. (list_posting_cards의 min_match 분기와 동일 방식)
+    # min_match/sort=match/industry/skills 전부 _apply_posting_filters(app/crud/posting.py)의
+    # 상관 서브쿼리·WHERE 절 레벨에서 처리된다 — list_posting_cards와 동일한 헬퍼를
+    # 공유하므로 DB LIMIT/OFFSET을 그대로 쓸 수 있고 파이썬 사이드 필터링/재정렬이
+    # 필요 없다. sort="match"인데 owned_skill_ids가 없으면(익명/이력서 없음)
+    # _get_filtered_postings가 자동으로 latest 정렬로 폴백한다.
+    total = _count_filtered_postings(
+        session=session,
+        pool=pool,
+        position=category,
+        district=district,
+        deadline_within_days=deadline_within_days,
+        skills=skills,
+        industry=industry,
+        min_match=min_match,
+        owned_skill_ids=owned_skill_ids,
+    )
     postings = _get_filtered_postings(
         session=session,
         pool=pool,
         position=category,
-        sort="latest",
+        sort=sort,
         district=district,
         deadline_within_days=deadline_within_days,
+        skills=skills,
+        industry=industry,
+        min_match=min_match,
+        owned_skill_ids=owned_skill_ids,
+        limit=page_size,
+        offset=(page - 1) * page_size,
     )
-    items = _build_feed_items(session, postings, owned_skill_ids)
-    filtered = [
-        item
-        for item in items
-        if (item.match.rate if item.match is not None else 0.0) >= min_match
-    ]
-    total = len(filtered)
-    offset = (page - 1) * page_size
-    return filtered[offset : offset + page_size], total
+    return _build_feed_items(session, postings, owned_skill_ids), total
