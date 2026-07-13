@@ -31,6 +31,14 @@ _JK_NAV_MARKERS = (
     "이 기업이 선택한 키워드", "이 기업이 선택한", "직무별 검색", "키워드 정보",
     "메뉴 건너뛰기", "잡코리아 채용정보", "채용정보 - 좋은 일", "jobkorea.co.kr",
 )
+# jobkorea description 앞부분에 "{회사} 채용 - {제목} | 잡코리아 회원가입/로그인 ...
+# 취업톡톡 ..." 형태의 사이트 헤더/내비게이션이 섞여 들어오는 경우가 있다(약 11k건).
+# 실제 공고 본문은 항상 이 문구 다음부터 시작해서 신뢰할 수 있는 시작 마커로 쓴다.
+_JK_BODY_START_MARKER = "채용정보에 잘못된 내용이 있을 경우 문의 해주세요."
+# 본문 뒤에는 "로그인 하고 비슷한 조건의 AI추천공고를 확인해 보세요!"로 시작하는
+# 추천공고 유도문구·마감일 안내·기업정보 푸터가 이어진다. 실제 공고 필드(모집분야/
+# 지원자격/복리후생 등)는 항상 이 문구 이전에서 끝나므로 끝 마커로도 신뢰할 수 있다.
+_JK_BODY_END_MARKER = "로그인 하고 비슷한 조건의"
 _ADMIN_RE = re.compile(r"^\S*[시군구]$")
 
 
@@ -177,9 +185,19 @@ def from_jobkorea(rec: dict) -> tuple[str, dict] | None:
     if not uid:
         return None
     desc = rec.get("description") or ""
+
+    start = desc.find(_JK_BODY_START_MARKER)
+    if start != -1:
+        desc = desc[start + len(_JK_BODY_START_MARKER) :]
+
+    end = desc.find(_JK_BODY_END_MARKER)
+    if end != -1:
+        desc = desc[:end]
+
     cuts = [p for p in (desc.find(mk) for mk in _JK_NAV_MARKERS) if p != -1]
     if cuts:
         desc = desc[: min(cuts)]
+
     return str(uid), {
         "logo_url": None,
         "region_district": None,
