@@ -955,3 +955,15 @@ def test_resume_primary_unique_index_rejects_second_primary_per_user() -> None:
         )
         with pytest.raises(IntegrityError):
             session.commit()
+
+    # Verify that multiple non-primary resumes per user are still allowed
+    # (this ensures the index is truly partial, not a full unique on user_id)
+    with testing_session() as assertion_session:
+        user = assertion_session.query(User).filter_by(email="primary@example.com").one()
+        assertion_session.add(
+            Resume(
+                user_id=user.id, title="C", position="backend",
+                career_min=0, career_max=1, pool="domestic", is_primary=False,
+            )
+        )
+        assertion_session.commit()  # Should succeed without IntegrityError
