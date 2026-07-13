@@ -974,3 +974,97 @@ def test_resume_primary_unique_index_rejects_second_primary_per_user() -> None:
             )
         )
         assertion_session.commit()  # Should succeed without IntegrityError
+
+
+def test_set_primary_resume_switches_flag_and_returns_updated_list(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(email="setprimary@example.com", password_hash="unused")
+        seed.add(user)
+        seed.flush()
+        first = Resume(
+            user_id=user.id, title="First", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=True,
+        )
+        second = Resume(
+            user_id=user.id, title="Second", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=False,
+        )
+        seed.add_all([first, second])
+        seed.commit()
+        user_id = user.id
+        first_id, second_id = first.resume_id, second.resume_id
+
+    def override_get_session():
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(
+            f"/api/v1/resume/{second_id}/primary",
+            headers={"Authorization": f"Bearer {create_access_token(user_id)}"},
+        )
+
+        assert response.status_code == 200
+        items = {item["resume_id"]: item["is_primary"] for item in response.json()["items"]}
+        assert items[first_id] is False
+        assert items[second_id] is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_primary_resume_promotes_most_recently_updated_remaining(monkeypatch) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        user = User(email="deleteprimary@example.com", password_hash="unused")
+        seed.add(user)
+        seed.flush()
+        primary = Resume(
+            user_id=user.id, title="Primary", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=True,
+        )
+        other = Resume(
+            user_id=user.id, title="Other", position="backend",
+            career_min=0, career_max=1, pool="domestic", is_primary=False,
+        )
+        seed.add_all([primary, other])
+        seed.commit()
+        user_id = user.id
+        primary_id, other_id = primary.resume_id, other.resume_id
+
+    def override_get_session():
+        with testing_session() as session:
+            yield session
+
+    monkeypatch.setattr("app.core.deps.is_token_blocklisted", lambda token: False)
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.delete(
+            f"/api/v1/resume/{primary_id}",
+            headers={"Authorization": f"Bearer {create_access_token(user_id)}"},
+        )
+        assert response.status_code == 204
+
+        with testing_session() as session:
+            remaining = session.get(Resume, other_id)
+            assert remaining.is_primary is True
+    finally:
+        app.dependency_overrides.clear()

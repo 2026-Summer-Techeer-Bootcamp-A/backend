@@ -7,6 +7,7 @@ from app.crud.resume import (
     delete_resume,
     get_resume_detail,
     get_resume_list,
+    set_primary_resume,
     update_resume,
 )
 from app.crud.resume_preference import get_resume_preferences, upsert_resume_preferences
@@ -124,6 +125,25 @@ def update_user_resume(
             detail="resume not found",
         )
     return ResumeUpdateResponse(resume_id=resume.resume_id)
+
+
+@router.post(
+    "/{id}/primary",
+    response_model=ResumeListResponse,
+    status_code=status.HTTP_200_OK,
+)
+def set_user_resume_primary(
+    id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> ResumeListResponse:
+    items = set_primary_resume(session, resume_id=id, user_id=current_user.id)
+    if items is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="resume not found",
+        )
+    return ResumeListResponse(items=items)
 
 
 @router.get(

@@ -100,6 +100,17 @@ def delete_resume(
     resume_id: int,
     user_id: int,
 ) -> bool:
+    target = session.scalar(
+        select(Resume).where(
+            Resume.resume_id == resume_id,
+            Resume.user_id == user_id,
+            Resume.is_deleted.is_(False),
+        )
+    )
+    if target is None:
+        return False
+    was_primary = target.is_primary
+
     result = session.execute(
         update(Resume)
         .where(
@@ -107,7 +118,7 @@ def delete_resume(
             Resume.user_id == user_id,
             Resume.is_deleted.is_(False),
         )
-        .values(is_deleted=True, deleted_at=func.now())
+        .values(is_deleted=True, deleted_at=func.now(), is_primary=False)
     )
     if result.rowcount == 0:
         return False
@@ -128,8 +139,48 @@ def delete_resume(
         )
         .values(is_deleted=True, deleted_at=func.now())
     )
+
+    if was_primary:
+        successor = session.scalar(
+            select(Resume)
+            .where(
+                Resume.user_id == user_id,
+                Resume.is_deleted.is_(False),
+            )
+            .order_by(Resume.updated_at.desc(), Resume.resume_id.desc())
+            .limit(1)
+        )
+        if successor is not None:
+            successor.is_primary = True
+
     session.commit()
     return True
+
+
+def set_primary_resume(
+    session: Session,
+    *,
+    resume_id: int,
+    user_id: int,
+) -> list[ResumeListItem] | None:
+    target = session.scalar(
+        select(Resume).where(
+            Resume.resume_id == resume_id,
+            Resume.user_id == user_id,
+            Resume.is_deleted.is_(False),
+        )
+    )
+    if target is None:
+        return None
+
+    session.execute(
+        update(Resume)
+        .where(Resume.user_id == user_id, Resume.is_primary.is_(True))
+        .values(is_primary=False)
+    )
+    target.is_primary = True
+    session.commit()
+    return get_resume_list(session, user_id=user_id)
 
 
 def get_resume_list(
