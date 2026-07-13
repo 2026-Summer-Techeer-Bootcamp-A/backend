@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from datetime import date, timedelta
 
@@ -56,6 +57,16 @@ def client() -> Iterator[TestClient]:
             ]
         )
 
+        # description_snippet은 Posting.description(JSON 섹션 문자열)에서 뽑는다.
+        # 실제 포맷: [{"title": .., "text": ..}, ...] (scripts/enrich_postings.py가 채움)
+        p1_desc_sections = json.dumps(
+            [
+                {"title": "소개", "text": "Python, Django 백엔드 개발자를\n   모집합니다."},
+                {"title": "우대사항", "text": "우대사항: MSA 경험"},
+            ],
+            ensure_ascii=False,
+        )
+
         p1 = Posting(
             source="wanted",
             source_uid="p1",
@@ -71,6 +82,7 @@ def client() -> Iterator[TestClient]:
             career_max=7,
             response_rate=82.5,
             seniority_raw="시니어",
+            description=p1_desc_sections,
         )
         p2 = Posting(
             source="wanted",
@@ -79,6 +91,7 @@ def client() -> Iterator[TestClient]:
             company="p2 company",
             title="p2 title",
             post_date=today - timedelta(days=1),
+            description=None,
         )
         p3 = Posting(
             source="himalayas",
@@ -87,6 +100,8 @@ def client() -> Iterator[TestClient]:
             company="p3 company",
             title="p3 title",
             post_date=today - timedelta(days=3),
+            # 손상된 JSON: 스니펫 파싱이 실패해도 피드 응답 자체가 죽으면 안 된다.
+            description="{not valid json",
         )
         seed.add_all([p1, p2, p3])
         seed.commit()
@@ -96,11 +111,6 @@ def client() -> Iterator[TestClient]:
         infoproc = Cert(name="정보처리기사")
         seed.add_all([msa, cicd, infoproc])
         seed.flush()
-
-        p1_description = (
-            "<p>Python, Django 백엔드 개발자를\n   모집합니다.</p>"
-            "<br/>우대사항: <b>MSA</b> 경험"
-        )
 
         seed.add_all(
             [
@@ -112,10 +122,7 @@ def client() -> Iterator[TestClient]:
                 PostingConcept(posting_id=p1.id, concept_id=msa.id),
                 PostingConcept(posting_id=p1.id, concept_id=cicd.id),
                 PostingCert(posting_id=p1.id, cert_id=infoproc.id),
-                RawPosting(
-                    posting_id=p1.id,
-                    payload={"url": "https://example.com/p1", "description": p1_description},
-                ),
+                RawPosting(posting_id=p1.id, payload={"url": "https://example.com/p1"}),
                 RawPosting(posting_id=p2.id, payload={"url": "https://example.com/p2"}),
                 RawPosting(posting_id=p3.id, payload={"url": "https://example.com/p3"}),
             ]
@@ -148,7 +155,6 @@ def test_feed_anonymous_returns_cards_without_match(client):
     assert first["description_snippet"] == (
         "Python, Django 백엔드 개발자를 모집합니다. 우대사항: MSA 경험"
     )
-    assert "<" not in first["description_snippet"]
     assert first["match"] is None
     assert first["career_min"] == 3
     assert first["career_max"] == 7
@@ -161,7 +167,11 @@ def test_feed_anonymous_returns_cards_without_match(client):
     assert second["concepts"] == []
     assert second["certs"] == []
     assert second["seniority"] is None
-    assert second["description_snippet"] is None  # payload에 description 키가 없음
+    assert second["description_snippet"] is None  # description이 없음(NULL)
+
+    third = body["items"][2]  # p3: description이 손상된 JSON -> 파싱 실패해도 죽지 않고 None
+    assert third["title"] == "p3 title"
+    assert third["description_snippet"] is None
 
 
 def test_feed_authed_includes_match(client, monkeypatch):
@@ -293,28 +303,38 @@ def test_feed_min_match_range_validated(client):
     assert res.status_code == 422
 
 
-def test_description_snippet_extraction_handles_html_and_edge_cases():
-    from app.crud.feed import _extract_description_snippet
+def test_build_description_snippet_edge_cases():
+    from app.crud.feed import _build_description_snippet
 
-    # payload가 없거나(None) description류 키가 비어 있으면 None
-    assert _extract_description_snippet(None) is None
-    assert _extract_description_snippet({}) is None
-    assert _extract_description_snippet({"description": "   "}) is None
+    # None/빈 문자열/빈 리스트/손상된 JSON -> None (피드가 죽으면 안 된다)
+    assert _build_description_snippet(None) is None
+    assert _build_description_snippet("") is None
+    assert _build_description_snippet("[]") is None
+    assert _build_description_snippet("not valid json") is None
+    assert _build_description_snippet("{}") is None  # 리스트가 아님
+    assert _build_description_snippet(json.dumps([{"title": "소개"}])) is None  # text 없음
+    assert _build_description_snippet(json.dumps([{"title": "소개", "text": "   "}])) is None
 
-    # 300자를 넘는 본문은 잘린다
-    long_text = "<div>" + ("가" * 350) + "</div>"
-    snippet = _extract_description_snippet({"description": long_text})
-    assert snippet == "가" * 300
-    assert len(snippet) == 300
-
-    # HTML 태그가 제거되고 공백이 정리된다
-    assert _extract_description_snippet({"body": "<p>Body   content</p>"}) == "Body content"
-
-    # 키 우선순위: description > description_ko > body > content > intro
-    assert (
-        _extract_description_snippet({"description": "primary", "body": "secondary"}) == "primary"
+    # 첫 섹션이 짧으면 다음 섹션까지 이어붙여 스니펫을 채운다 + 공백 정리
+    short_sections = json.dumps(
+        [
+            {"title": "소개", "text": "짧은 소개\n   문구입니다."},
+            {"title": "주요 업무", "text": "업무 내용입니다."},
+        ],
+        ensure_ascii=False,
     )
-    assert (
-        _extract_description_snippet({"description_ko": "ko", "content": "en"}) == "ko"
+    assert _build_description_snippet(short_sections) == "짧은 소개 문구입니다. 업무 내용입니다."
+
+    # 첫 섹션이 충분히 길면 두 번째 섹션은 합치지 않는다
+    long_first = "가" * 100
+    long_sections = json.dumps(
+        [{"title": "소개", "text": long_first}, {"title": "주요 업무", "text": "안 보여야 함"}],
+        ensure_ascii=False,
     )
-    assert _extract_description_snippet({"content": "from content"}) == "from content"
+    assert _build_description_snippet(long_sections) == long_first
+
+    # 300자를 넘으면 잘리고 말줄임표가 붙는다
+    very_long = json.dumps([{"title": "소개", "text": "나" * 350}], ensure_ascii=False)
+    snippet = _build_description_snippet(very_long)
+    assert snippet == ("나" * 300) + "…"
+    assert len(snippet) == 301
