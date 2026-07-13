@@ -39,10 +39,18 @@ jobs:
           docker push "$IMAGE_URI:${GITHUB_SHA}"
           docker push "$IMAGE_URI:latest"
 
+      - name: Sync compose file and observability config to VM
+        run: |
+          gcloud compute scp --zone ${REGION}-a --recurse \
+            docker-compose.yml observability app-vm:/tmp/deploy-sync
+
       - name: Deploy on VM via SSH
         run: |
           gcloud compute ssh app-vm --zone ${REGION}-a --command \
-            "cd /opt/app && sudo docker compose pull && sudo docker compose up -d && sudo docker compose ps" | tee deploy_out.txt
+            "sudo cp /tmp/deploy-sync/docker-compose.yml /opt/app/docker-compose.yml && \
+             sudo cp -r /tmp/deploy-sync/observability/. /opt/app/observability/ && \
+             cd /opt/app && sudo docker compose pull && sudo docker compose up -d && sudo docker compose ps" \
+            | tee deploy_out.txt
 
       - name: Send Notifications
         if: always()
