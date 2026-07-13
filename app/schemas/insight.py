@@ -111,3 +111,39 @@ class RoleStackFitResponse(BaseModel):
     matrix: list[list[float]]
     as_of: str
     sample_size: int
+
+
+class SkillShareItem(BaseModel):
+    canonical: str
+    category: str | None
+    posting_count: int
+    share: float
+
+
+class SkillShareResponse(BaseModel):
+    """기술 점유율 — mv_skill_share 마트 노출. position 미지정 시 skill별 posting_count 합산."""
+
+    items: list[SkillShareItem]
+    as_of: str
+    sample_size: int
+
+
+class CoocNode(BaseModel):
+    canonical: str
+    category: str | None
+    freq: int
+
+
+class CoocLink(BaseModel):
+    source: str
+    target: str
+    co_count: int
+    co_rate: float
+
+
+class CooccurrenceResponse(BaseModel):
+    """기술 co-occurrence 네트워크 — mv_cooccurrence 마트 노출."""
+
+    nodes: list[CoocNode]
+    links: list[CoocLink]
+    as_of: str

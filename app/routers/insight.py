@@ -10,20 +10,24 @@ from fastapi import APIRouter, Query
 
 from app.core.deps import SessionDep
 from app.crud.insight import (
+    get_cooccurrence,
     get_global_domestic_gap,
     get_hiring_season,
     get_hype_vs_hire,
     get_industry_fingerprint,
     get_newcomer_gate,
     get_role_stack_fit,
+    get_skill_share,
 )
 from app.schemas.insight import (
+    CooccurrenceResponse,
     GlobalDomesticGapResponse,
     HiringSeasonResponse,
     HypeVsHireResponse,
     IndustryFingerprintResponse,
     NewcomerGateResponse,
     RoleStackFitResponse,
+    SkillShareResponse,
 )
 from app.schemas.posting import Pool
 
@@ -125,4 +129,36 @@ def stats_role_stack_fit(
         matrix=matrix,
         as_of=date.today().isoformat(),
         sample_size=sample_size,
+    )
+
+
+@router.get("/stats/skill-share", response_model=SkillShareResponse)
+def stats_skill_share(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    position: Annotated[str | None, Query(description="job_category name. 미지정 시 전체 직군 합산")] = None,
+    top_k: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SkillShareResponse:
+    """풀(+직군) 내 기술 점유율. mv_skill_share 마트 기반, posting_count 내림차순 top_k."""
+    items, sample_size = get_skill_share(session=session, pool=pool, position=position, top_k=top_k)
+    return SkillShareResponse(
+        items=items,
+        as_of=date.today().isoformat(),
+        sample_size=sample_size,
+    )
+
+
+@router.get("/stats/cooccurrence", response_model=CooccurrenceResponse)
+def stats_cooccurrence(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")],
+    skill: Annotated[str | None, Query(description="포커스 canonical 기술명. 미지정 시 pool 전체 상위 링크")] = None,
+    top_k: Annotated[int, Query(ge=1, le=200)] = 30,
+) -> CooccurrenceResponse:
+    """기술 co-occurrence 네트워크. skill 지정 시 이웃 링크, 미지정 시 pool 전체 상위 링크(중복 쌍 제거)."""
+    nodes, links = get_cooccurrence(session=session, pool=pool, skill=skill, top_k=top_k)
+    return CooccurrenceResponse(
+        nodes=nodes,
+        links=links,
+        as_of=date.today().isoformat(),
     )
