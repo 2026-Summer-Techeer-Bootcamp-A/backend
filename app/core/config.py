@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     cors_origin_regex: str = r"https://frontend-tan-chi-25-[a-z0-9-]+\.vercel\.app"
 
     # TODO: consumed by the future DB connection layer (SQLAlchemy engine / session).
-    database_url: str = "postgresql+psycopg://appuser:change-me@db:5432/appdb"
+    database_url: str = "postgresql+psycopg://appuser:change-me@db:5432/appdb_load"
 
     # TODO: consumed by the future Redis client setup.
     redis_url: str = "redis://redis:6379/0"
@@ -27,8 +27,10 @@ class Settings(BaseSettings):
     resume_parse_max_bytes: int = 10 * 1024 * 1024
     resume_confirm_session_ttl_seconds: int = 3600
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-3.5-flash"
-    gemini_timeout_seconds: float = 10.0
+    gemini_model: str = "gemini-2.5-flash"
+    # 엄격한 면접관 시스템 프롬프트 + JSON 모드 조합은 실측 16~17초까지 걸려
+    # 기존 10초 기본값으로는 항상 폴백으로 빠졌다. 여유를 두고 25초로 상향.
+    gemini_timeout_seconds: float = 25.0
 
     # 임베딩 모델 = 로컬 BGE-M3(출력 1024차원). pgvector 컬럼 차원과 반드시 일치해야 함.
     # (구값 1536은 OpenAI ada-002 기준 잔재였음 — BGE-M3로 확정하며 1024로 정정.)
