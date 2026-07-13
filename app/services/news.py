@@ -38,10 +38,36 @@ def _fetch_hackernews(limit: int) -> list[dict]:
     return items
 
 
-def _fetch_geeknews(limit: int) -> list[dict]:
-    response = requests.get("https://news.hada.io/rss/news", timeout=_FETCH_TIMEOUT_SECONDS)
-    response.raise_for_status()
-    root = ET.fromstring(response.content)
+_ATOM_NS = "{http://www.w3.org/2005/Atom}"
+
+
+def _atom_entry_url(entry: ET.Element) -> str | None:
+    """entry의 link 중 rel='alternate'를 우선하고, 없으면 첫 link를 사용."""
+    links = entry.findall(f"{_ATOM_NS}link")
+    for link in links:
+        if link.get("rel") == "alternate" and link.get("href"):
+            return link.get("href")
+    for link in links:
+        if link.get("href"):
+            return link.get("href")
+    return None
+
+
+def _parse_geeknews_atom(root: ET.Element, limit: int) -> list[dict]:
+    items: list[dict] = []
+    for entry in root.iter(f"{_ATOM_NS}entry"):
+        title = entry.findtext(f"{_ATOM_NS}title")
+        url = _atom_entry_url(entry)
+        if not title or not url:
+            continue
+        items.append({"title": title, "url": url, "comments_url": url})
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _parse_geeknews_rss(root: ET.Element, limit: int) -> list[dict]:
+    """news.hada.io가 RSS 2.0으로 되돌아갈 경우를 대비한 폴백 파서."""
     items: list[dict] = []
     for item in root.iter("item"):
         title = item.findtext("title")
@@ -51,6 +77,19 @@ def _fetch_geeknews(limit: int) -> list[dict]:
         items.append({"title": title, "url": link, "comments_url": link})
         if len(items) >= limit:
             break
+    return items
+
+
+def _fetch_geeknews(limit: int) -> list[dict]:
+    # news.hada.io/rss/news는 이름과 달리 RSS 2.0이 아니라 Atom 피드를 반환한다
+    # (<feed>/<entry>, link는 rel='alternate' href 속성). 네임스페이스 인식 파싱을
+    # 우선 시도하고, 포맷이 다시 RSS로 바뀌는 경우를 대비해 <item> 폴백도 유지한다.
+    response = requests.get("https://news.hada.io/rss/news", timeout=_FETCH_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    root = ET.fromstring(response.content)
+    items = _parse_geeknews_atom(root, limit)
+    if not items:
+        items = _parse_geeknews_rss(root, limit)
     return items
 
 
@@ -99,6 +138,10 @@ def get_news(source: str, limit: int) -> dict:
 
     try:
         items = _FETCHERS[source](NEWS_FETCH_LIMIT)
+        if not items:
+            # 빈 결과는 파서/포맷 문제일 수 있는 사실상의 페치 실패로 취급한다.
+            # 유효한 페이로드로 캐싱하면 오류가 TTL 동안 그대로 굳어버린다.
+            raise ValueError(f"{source} fetch returned no items")
     except Exception:
         stale_raw = redis_client.get(f"{cache_key}:stale")
         if stale_raw is not None:
