@@ -3,12 +3,16 @@
 프론트 `/widgets` 갤러리에만 있던 pearl 지표(a,h,o,p,r,x)를 정식 엔드포인트로 노출한다.
 """
 
+import logging
 from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, Query
+from pydantic import ValidationError
+from redis.exceptions import RedisError
 
 from app.core.deps import SessionDep
+from app.core.redis import redis_client
 from app.crud.insight import (
     get_concept_tech,
     get_cooccurrence,
@@ -53,6 +57,10 @@ from app.schemas.insight import (
 from app.schemas.posting import Pool
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+HIRING_SEASON_CACHE_KEY = "stats:hiring-season:v1"
+HIRING_SEASON_CACHE_TTL_SECONDS = 6 * 60 * 60
 
 
 @router.get("/trend/hype-vs-hire", response_model=HypeVsHireResponse)
@@ -107,13 +115,35 @@ def stats_global_domestic_gap(
 @router.get("/stats/hiring-season", response_model=HiringSeasonResponse)
 def stats_hiring_season(session: SessionDep) -> HiringSeasonResponse:
     """월별 채용 성수기 지수(=월별 건수/월평균). himalayas·진행 중인 올해는 제외합니다."""
+    try:
+        cached = redis_client.get(HIRING_SEASON_CACHE_KEY)
+    except RedisError:
+        logger.warning("채용 성수기 캐시 조회 실패", exc_info=True)
+    else:
+        if cached is not None:
+            try:
+                return HiringSeasonResponse.model_validate_json(cached)
+            except (ValidationError, ValueError, TypeError):
+                logger.warning("채용 성수기 캐시 데이터 검증 실패", exc_info=True)
+
     months, pool_totals = get_hiring_season(session=session)
-    return HiringSeasonResponse(
+    response = HiringSeasonResponse(
         months=months,
         as_of=date.today().isoformat(),
         sample_size=pool_totals,
         note="himalayas(단일 스냅샷) 제외 · 진행 중인 올해 제외 · 지수=월별건수/월평균",
     )
+
+    try:
+        redis_client.setex(
+            HIRING_SEASON_CACHE_KEY,
+            HIRING_SEASON_CACHE_TTL_SECONDS,
+            response.model_dump_json(),
+        )
+    except RedisError:
+        logger.warning("채용 성수기 캐시 저장 실패", exc_info=True)
+
+    return response
 
 
 @router.get("/stats/industry-fingerprint", response_model=IndustryFingerprintResponse)
