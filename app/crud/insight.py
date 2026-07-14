@@ -8,7 +8,7 @@ import statistics
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, distinct, func, select, text
+from sqlalchemy import bindparam, case, distinct, func, select, text
 from sqlalchemy.orm import Session
 
 from app.models import InterestSignal, JobCategory, Posting, PostingCategory, PostingTech, Skill
@@ -236,59 +236,66 @@ def get_hiring_season(session: Session) -> tuple[list[dict], dict[str, int]]:
 def get_industry_fingerprint(
     session: Session, *, limit_industries: int = 8, limit_skills: int = 8
 ) -> tuple[list[dict], int]:
-    """산업별 기술 지문. index = 산업 내 비중 / 전 산업 평균 비중(그 기술이 등장하는 산업들 기준)."""
-    base_filters = [
-        Posting.pool == "domestic",
-        Posting.industry.isnot(None),
-        Posting.is_deleted.is_(False),
-    ]
-
-    industry_totals_rows = session.execute(
-        select(Posting.industry, func.count().label("n")).where(*base_filters).group_by(Posting.industry)
+    """Read the pre-aggregated domestic industry fingerprint materialized view."""
+    top_industries = session.execute(
+        text(
+            """
+            SELECT industry, MAX(industry_total) AS industry_total
+            FROM mv_industry_fingerprint
+            GROUP BY industry
+            ORDER BY industry_total DESC, industry ASC
+            LIMIT :limit_industries
+            """
+        ),
+        {"limit_industries": limit_industries},
     ).all()
-    industry_totals = {row.industry: row.n for row in industry_totals_rows}
-    if not industry_totals:
+    if not top_industries:
         return [], 0
 
+    industry_names = [row.industry for row in top_industries]
     rows = session.execute(
-        select(Posting.industry, Skill.canonical, func.count(distinct(Posting.id)).label("n"))
-        .select_from(Posting)
-        .join(PostingTech, PostingTech.posting_id == Posting.id)
-        .join(Skill, Skill.id == PostingTech.skill_id)
-        .where(*base_filters, PostingTech.is_deleted.is_(False), Skill.is_deleted.is_(False))
-        .group_by(Posting.industry, Skill.canonical)
+        text(
+            """
+            SELECT industry, skill_canonical, posting_count, share, avg_share
+            FROM mv_industry_fingerprint
+            WHERE industry IN :industry_names
+            ORDER BY industry ASC,
+                     (share / NULLIF(avg_share, 0)) DESC,
+                     skill_canonical ASC
+            """
+        ).bindparams(bindparam("industry_names", expanding=True)),
+        {"industry_names": industry_names},
     ).all()
 
-    shares: dict[str, dict[str, dict]] = {}
-    skill_industry_shares: dict[str, list[float]] = {}
+    signatures: dict[str, list[dict]] = {name: [] for name in industry_names}
     for row in rows:
-        share = row.n / industry_totals[row.industry]
-        shares.setdefault(row.industry, {})[row.canonical] = {"n": row.n, "share": share}
-        skill_industry_shares.setdefault(row.canonical, []).append(share)
-
-    avg_share = {skill: sum(vals) / len(vals) for skill, vals in skill_industry_shares.items()}
-
-    top_industries = sorted(industry_totals.items(), key=lambda kv: kv[1], reverse=True)[:limit_industries]
-
-    industries_out = []
-    for industry_name, n in top_industries:
-        signature = []
-        for skill_name, info in shares.get(industry_name, {}).items():
-            avg = avg_share.get(skill_name, 0)
-            if avg <= 0:
-                continue
-            signature.append(
+        if row.avg_share and len(signatures[row.industry]) < limit_skills:
+            signatures[row.industry].append(
                 {
-                    "canonical": skill_name,
-                    "index": round(info["share"] / avg, 2),
-                    "share_pct": round(info["share"] * 100, 1),
-                    "n": info["n"],
+                    "canonical": row.skill_canonical,
+                    "index": round(row.share / row.avg_share, 2),
+                    "share_pct": round(row.share * 100, 1),
+                    "n": row.posting_count,
                 }
             )
-        signature.sort(key=lambda s: s["index"], reverse=True)
-        industries_out.append({"name": industry_name, "n": n, "signature": signature[:limit_skills]})
 
-    return industries_out, sum(industry_totals.values())
+    industries_out = [
+        {"name": row.industry, "n": row.industry_total, "signature": signatures[row.industry]}
+        for row in top_industries
+    ]
+    sample_size = session.execute(
+        text(
+            """
+            SELECT COALESCE(SUM(industry_total), 0)
+            FROM (
+                SELECT industry, MAX(industry_total) AS industry_total
+                FROM mv_industry_fingerprint
+                GROUP BY industry
+            ) totals
+            """
+        )
+    ).scalar_one()
+    return industries_out, sample_size
 
 
 def get_role_stack_fit(
