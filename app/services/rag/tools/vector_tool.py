@@ -49,6 +49,7 @@ def semantic_search(
 
     facts = "; ".join(f"{it['name']} {it['metric']}" for it in items[:5])
     return {
+        "tool": "vector",
         "tool_result": {"kind": "list", "label": "의미 유사 공고", "items": items},
         "citation": {"type": "vector", "ref": "채용공고 의미벡터", "label": "BGE-M3 코사인 top-k"},
         "n": len(rows),
