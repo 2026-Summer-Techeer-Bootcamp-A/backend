@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -112,6 +112,36 @@ def client() -> Iterator[TestClient]:
         )
         seed.commit()
 
+        # SQLite stands in for the Postgres materialized view in fast tests.
+        seed.execute(
+            text(
+                """
+                CREATE TABLE mv_industry_fingerprint (
+                    industry TEXT NOT NULL,
+                    skill_canonical TEXT NOT NULL,
+                    posting_count INTEGER NOT NULL,
+                    industry_total INTEGER NOT NULL,
+                    share FLOAT NOT NULL,
+                    avg_share FLOAT NOT NULL
+                )
+                """
+            )
+        )
+        seed.execute(
+            text(
+                """
+                INSERT INTO mv_industry_fingerprint
+                    (industry, skill_canonical, posting_count, industry_total, share, avg_share)
+                VALUES
+                    ('fintech', 'Python', 1, 2, 0.5, 0.5),
+                    ('fintech', 'Java', 1, 2, 0.5, 0.5),
+                    ('fintech', 'Spring', 2, 2, 1.0, 1.0),
+                    ('game', 'AWS', 1, 1, 1.0, 1.0)
+                """
+            )
+        )
+        seed.commit()
+
     def override_get_session() -> Iterator[Session]:
         with testing_session() as session:
             yield session
@@ -180,6 +210,10 @@ def test_industry_fingerprint_scoped_to_domestic(client: TestClient) -> None:
     body = resp.json()
     names = {entry["name"] for entry in body["industries"]}
     assert names == {"fintech", "game"}
+    assert body["sample_size"] == 3
+    fintech = next(entry for entry in body["industries"] if entry["name"] == "fintech")
+    assert fintech["n"] == 2
+    assert {item["canonical"] for item in fintech["signature"]} == {"Python", "Java", "Spring"}
 
 
 def test_role_stack_fit_excludes_non_tech_categories(client: TestClient) -> None:
