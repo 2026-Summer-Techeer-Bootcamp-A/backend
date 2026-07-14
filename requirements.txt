@@ -15,5 +15,6 @@ redis
 email-validator
 requests
 
-# RAG vector_tool 쿼리 임베딩(BGE-M3 CPU/onnx). enable_vector_search 플래그로 게이팅.
-fastembed>=0.4,<0.8
+# RAG vector_tool 쿼리 임베딩(BGE-M3 CPU). 저장된 공고 벡터와 동일하게
+# sentence-transformers로 생성해야 같은 임베딩 공간이 된다. enable_vector_search 플래그로 게이팅.
+sentence-transformers>=3.0,<4.0
