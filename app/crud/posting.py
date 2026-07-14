@@ -49,6 +49,7 @@ def list_posting_cards(
     q: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
+    rich_only: bool = False,
 ) -> tuple[list[dict], int]:
     owned_skill_ids = (
         get_resume_skill_ids(session, resume_id=resume_id, user_id=user_id)
@@ -65,6 +66,7 @@ def list_posting_cards(
         q=q,
         skills=skills,
         industry=industry,
+        rich_only=rich_only,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
@@ -79,6 +81,7 @@ def list_posting_cards(
         q=q,
         skills=skills,
         industry=industry,
+        rich_only=rich_only,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
@@ -163,6 +166,7 @@ def _apply_posting_filters(
     q: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
+    rich_only: bool = False,
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
@@ -209,6 +213,12 @@ def _apply_posting_filters(
 
     if industry is not None:
         stmt = stmt.where(Posting.industry.ilike(f"%{industry}%"))
+
+    if rich_only:
+        # 소스별 서술형 설명 길이의 실제 분포를 기준으로 정한 임계값이다(빈약한
+        # 쪽 중앙값 ~75-88자, 풍부한 쪽 중앙값 300-4000자+). 데이터 재검증 없이
+        # 바꾸지 않는다.
+        stmt = stmt.where(Posting.description.isnot(None), func.length(Posting.description) >= 200)
 
     if deadline_within_days is not None:
         today = date.today()
@@ -267,6 +277,7 @@ def _count_filtered_postings(
     q: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
+    rich_only: bool = False,
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
@@ -280,6 +291,7 @@ def _count_filtered_postings(
         q=q,
         skills=skills,
         industry=industry,
+        rich_only=rich_only,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
@@ -300,6 +312,7 @@ def _get_filtered_postings(
     q: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
+    rich_only: bool = False,
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
@@ -313,6 +326,7 @@ def _get_filtered_postings(
         q=q,
         skills=skills,
         industry=industry,
+        rich_only=rich_only,
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
