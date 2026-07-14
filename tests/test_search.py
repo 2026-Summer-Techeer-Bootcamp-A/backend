@@ -13,7 +13,21 @@ from app.models import Posting, Skill, SkillAlias
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    from app.services import search_cache
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.store: dict[str, str] = {}
+
+        def get(self, key: str) -> str | None:
+            return self.store.get(key)
+
+        def setex(self, key: str, ttl: int, value: str) -> None:
+            self.store[key] = value
+
+    monkeypatch.setattr(search_cache, "redis_client", FakeRedis())
+
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -157,6 +171,44 @@ def test_search_blank_q_returns_422(client: TestClient) -> None:
     response = client.get("/api/v1/search", params={"q": ""})
 
     assert response.status_code == 422
+
+
+def test_search_whitespace_only_q_returns_422(client: TestClient) -> None:
+    response = client.get("/api/v1/search", params={"q": "   "})
+
+    assert response.status_code == 422
+
+
+def test_search_rejects_query_longer_than_100_characters(client: TestClient) -> None:
+    response = client.get("/api/v1/search", params={"q": "a" * 101})
+
+    assert response.status_code == 422
+
+
+def test_repeated_normalized_search_uses_cached_result(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.routers import search as search_router
+
+    original_search_all = search_router.search_all
+    calls = 0
+
+    def counted_search_all(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_search_all(*args, **kwargs)
+
+    monkeypatch.setattr(search_router, "search_all", counted_search_all)
+
+    first = client.get("/api/v1/search", params={"q": " Python "})
+    second = client.get("/api/v1/search", params={"q": "python"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["postings"] == second.json()["postings"]
+    assert second.json()["query"] == "python"
+    assert calls == 1
 
 
 def test_search_no_match_returns_empty_lists(client: TestClient) -> None:
