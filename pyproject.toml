@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --tb=short"
+markers = [
+    "integration: 실 Postgres가 필요한 통합 테스트 (DATABASE_URL 설정 시에만 실행)",
+]
+
+[tool.ruff]
+target-version = "py312"
