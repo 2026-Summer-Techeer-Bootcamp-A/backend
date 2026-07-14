@@ -1,17 +1,49 @@
 """Stats/Trend 확장 인사이트 엔드포인트 테스트 (a,h,o,p,r,x)."""
 
+import json
 from collections.abc import Iterator
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from redis.exceptions import RedisError
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base, get_session
 from app.main import app
 from app.models import InterestSignal, JobCategory, Posting, PostingCategory, PostingTech, Skill
+from app.routers import insight as insight_router
+from app.schemas.insight import HiringSeasonResponse
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+        self.setex_calls: list[tuple[str, int, str]] = []
+
+    def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    def setex(self, key: str, ttl: int, value: str) -> None:
+        self.store[key] = value
+        self.setex_calls.append((key, ttl, value))
+
+
+class BrokenRedis:
+    def get(self, key: str) -> str | None:
+        raise RedisError("redis unavailable")
+
+    def setex(self, key: str, ttl: int, value: str) -> None:
+        raise RedisError("redis unavailable")
+
+
+@pytest.fixture
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
+    fake = FakeRedis()
+    monkeypatch.setattr(insight_router, "redis_client", fake, raising=False)
+    return fake
 
 
 @pytest.fixture
@@ -21,6 +53,12 @@ def client() -> Iterator[TestClient]:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    sql_statements: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture_sql(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+        sql_statements.append(statement)
+
     Base.metadata.create_all(engine)
     testing_session = sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -147,7 +185,9 @@ def client() -> Iterator[TestClient]:
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    yield TestClient(app)
+    test_client = TestClient(app)
+    test_client.sql_statements = sql_statements
+    yield test_client
     app.dependency_overrides.clear()
 
 
@@ -193,14 +233,97 @@ def test_global_domestic_gap_never_mixes_pools(client: TestClient) -> None:
     assert python_entry["domestic_n"] == 1
 
 
-def test_hiring_season_excludes_himalayas_and_current_year(client: TestClient) -> None:
+def test_hiring_season_excludes_himalayas_and_current_year(
+    client: TestClient,
+    fake_redis: FakeRedis,
+) -> None:
     resp = client.get("/api/v1/stats/hiring-season")
 
     assert resp.status_code == 200
     body = resp.json()
-    # stripe(himalayas, 2026-06)는 제외돼야 하므로 6월 global_n에 안 잡힘
-    june = next(m for m in body["months"] if m["month"] == 6)
-    assert june["global_n"] == 0
+    assert body["sample_size"] == {"global": 1, "domestic": 3}
+    assert body["months"] == [
+        {"month": 1, "global_idx": 0.0, "domestic_idx": 4.0, "global_n": 0, "domestic_n": 1},
+        {"month": 2, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 3, "global_idx": 0.0, "domestic_idx": 4.0, "global_n": 0, "domestic_n": 1},
+        {"month": 4, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 5, "global_idx": 12.0, "domestic_idx": 0.0, "global_n": 1, "domestic_n": 0},
+        {"month": 6, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 7, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 8, "global_idx": 0.0, "domestic_idx": 4.0, "global_n": 0, "domestic_n": 1},
+        {"month": 9, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 10, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 11, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+        {"month": 12, "global_idx": 0.0, "domestic_idx": 0.0, "global_n": 0, "domestic_n": 0},
+    ]
+
+
+def test_hiring_season_uses_database_group_by(client: TestClient, fake_redis: FakeRedis) -> None:
+    resp = client.get("/api/v1/stats/hiring-season")
+
+    assert resp.status_code == 200
+    posting_selects = [
+        statement
+        for statement in client.sql_statements
+        if statement.lstrip().upper().startswith("SELECT") and "FROM posting" in statement
+    ]
+    assert any("GROUP BY" in statement.upper() for statement in posting_selects)
+
+
+def test_hiring_season_cache_miss_sets_six_hour_ttl(client: TestClient, fake_redis: FakeRedis) -> None:
+    resp = client.get("/api/v1/stats/hiring-season")
+
+    assert resp.status_code == 200
+    assert len(fake_redis.setex_calls) == 1
+    key, ttl, cached_json = fake_redis.setex_calls[0]
+    assert key == "stats:hiring-season:v1"
+    assert ttl == 21_600
+    assert HiringSeasonResponse.model_validate_json(cached_json).model_dump(mode="json") == resp.json()
+
+
+def test_hiring_season_cache_hit_skips_database(
+    client: TestClient,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cached_payload = {
+        "months": [
+            {
+                "month": month,
+                "global_idx": 1.0,
+                "domestic_idx": 1.0,
+                "global_n": 7,
+                "domestic_n": 9,
+            }
+            for month in range(1, 13)
+        ],
+        "as_of": "2026-07-14",
+        "sample_size": {"global": 84, "domestic": 108},
+        "note": "cached response",
+    }
+    fake_redis.store["stats:hiring-season:v1"] = json.dumps(cached_payload)
+
+    def fail_if_called(*, session: Session) -> tuple[list[dict], dict[str, int]]:
+        raise AssertionError("database must not be queried on cache hit")
+
+    monkeypatch.setattr(insight_router, "get_hiring_season", fail_if_called)
+
+    resp = client.get("/api/v1/stats/hiring-season")
+
+    assert resp.status_code == 200
+    assert resp.json() == cached_payload
+
+
+def test_hiring_season_redis_failure_falls_back_to_database(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(insight_router, "redis_client", BrokenRedis(), raising=False)
+
+    resp = client.get("/api/v1/stats/hiring-season")
+
+    assert resp.status_code == 200
+    assert resp.json()["sample_size"] == {"global": 1, "domestic": 3}
 
 
 def test_industry_fingerprint_scoped_to_domestic(client: TestClient) -> None:
