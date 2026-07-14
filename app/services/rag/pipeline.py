@@ -40,9 +40,18 @@ def _confidence_level(n: int) -> int:
     return 5
 
 
-def _dispatch(session: Session, p: Plan) -> list[dict]:
-    """intent에 따라 도구를 실행하고 tool_output 리스트를 반환. 실패 시 랭킹으로 폴백."""
+def _dispatch(session: Session, p: Plan) -> tuple[list[dict], bool]:
+    """intent에 따라 도구를 실행하고 (tool_output 리스트, fell_back)을 반환.
+
+    fell_back=True는 "질문이 겨냥한 대상과 실제로 답한 대상이 다르다"는 뜻이다 — 즉
+    top_skills 랭킹으로 강제 대체됐는데, 그 대체가 직군/신입 같은 필터로도 좁혀지지
+    않아 정말 근거 없이 일반 랭킹을 내놓은 경우만 True다. category/entry_level로
+    스코프를 좁혀서 top_skills로 답했다면 그건 질문이 겨냥한 대상에 정확히 맞춘
+    답이므로 fell_back=False로 취급한다(신뢰도가 부당하게 깎이지 않도록).
+    """
     skill = p.entities.get("skill")
+    category = p.entities.get("job_category")
+    entry_level = bool(p.entities.get("entry_level"))
     pool = p.pool
     out: list[dict] = []
 
@@ -55,17 +64,41 @@ def _dispatch(session: Session, p: Plan) -> list[dict]:
         if r:
             out.append(r)
     elif p.intent == "skill_demand" and skill:
-        r = sql_tool.skill_demand(session, skill, pool)
+        r = sql_tool.skill_demand(session, skill, pool, category=category, entry_level=entry_level)
         if r:
             out.append(r)
+    elif p.intent == "compare":
+        skills_list = p.entities.get("skills") or []
+        if skills_list:
+            r = sql_tool.multi_skill_compare(session, list(skills_list), pool, category=category, entry_level=entry_level)
+            if r:
+                out.append(r)
     elif p.intent == "concept_ranking":
         out.append(sql_tool.top_concepts(session, pool))
     elif p.intent == "cert_ranking":
-        out.append(sql_tool.top_certs(session, pool))
+        out.append(sql_tool.top_certs(session, pool, category=category, entry_level=entry_level))
+    elif p.intent == "region_distribution":
+        out.append(sql_tool.top_locations(session, pool))
 
-    if not out:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
-        out.append(sql_tool.top_skills(session, pool))
-    return out
+    used_fallback_branch = not out
+    if used_fallback_branch:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
+        out.append(
+            sql_tool.top_skills(session, pool, category=category, entry_level=entry_level)
+        )
+    fell_back = used_fallback_branch and not category and not entry_level
+
+    # 교차 결합 인사이트: skill_ranking(top_skills로 답한 경우, 폴백 포함)과
+    # skill_demand는 1위/특정 기술의 동반 기술을 보강 조회로 덧붙인다. compare는
+    # 여러 기술을 이미 나열하므로 교차 인사이트를 붙이지 않는다.
+    if p.intent in ("skill_ranking", "skill_demand") and out:
+        primary_items = out[0]["tool_result"].get("items") or []
+        if primary_items:
+            insight_skill = primary_items[0]["name"]
+            insight = graph_tool.co_occurring_skills(session, insight_skill, pool)
+            if insight:
+                out.append(insight)
+
+    return out, fell_back
 
 
 def run_chat_events(
@@ -96,6 +129,12 @@ def run_chat_events(
             label="질문 분해",
             detail=f"intent={p.intent} · tools={','.join(p.tools)}"
             + (f" · skill={p.entities['skill']}" if p.entities.get("skill") else "")
+            + (
+                f" · 직군={p.entities['job_category']}"
+                if p.entities.get("job_category")
+                else ""
+            )
+            + (" · 신입" if p.entities.get("entry_level") else "")
             + (" · (휴리스틱 폴백)" if plan_degraded else ""),
         )
         collect["steps"].append(plan_step)
@@ -111,13 +150,15 @@ def run_chat_events(
             },
         }
 
-        tool_outputs = _dispatch(session, p)
+        tool_outputs, fell_back = _dispatch(session, p)
         collect["tool_outputs"] = tool_outputs
+        if fell_back:
+            plan_step.detail = (plan_step.detail or "") + " · (대상 미해소, 일반 랭킹으로 대체)"
         for o in tool_outputs:
             tr = o["tool_result"]
             step = Step(
                 kind="tool",
-                tool=tr["kind"] if tr["kind"] in ("graph",) else p.tools[0],
+                tool=o.get("tool", p.tools[0]),
                 label=tr["label"],
                 detail=o["citation"]["label"],
             )
@@ -154,7 +195,11 @@ def run_chat_events(
         # 답을 실제로 내지 못했다면(근거 자체가 없던 경우만) n과 무관하게 신뢰도를 낮춘다 —
         # '부족해요' 답변에 신뢰도 높음/N건이 함께 뜨는 모순을 막기 위함.
         confidence_level = _confidence_level(n) if answered else 0
-        degraded = plan_degraded or synth_degraded or not passed or not answered
+        # 의도된 도구가 대상을 못 찾아 일반 랭킹으로 강제 대체된 경우, 표본 n은 커도
+        # 질문과 무관한 답이므로 신뢰도를 상한 2로 깎는다.
+        if fell_back and answered:
+            confidence_level = min(confidence_level, 2)
+        degraded = plan_degraded or synth_degraded or not passed or not answered or fell_back
 
         citations = [Citation(**o["citation"]) for o in tool_outputs]
         tool_results = [ToolResult(**o["tool_result"]) for o in tool_outputs]
