@@ -118,6 +118,36 @@ def top_certs(session: Session, pool: str | None = None, limit: int = 8) -> dict
     }
 
 
+def top_locations(session: Session, pool: str | None = None, limit: int = 8) -> dict:
+    total = total_postings(session, pool)
+    rows = _top(
+        session,
+        f"SELECT p.region_district, COUNT(*) n FROM posting p "
+        f"WHERE {_POOL_WHERE} AND p.region_district IS NOT NULL "
+        f"GROUP BY p.region_district ORDER BY n DESC LIMIT :limit",
+        pool,
+        limit,
+    )
+    items = [
+        {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
+        for n, c in rows
+    ]
+    facts = "; ".join(f"{n} {c}건({round(100 * c / total, 1) if total else 0}%)" for n, c in rows)
+    return {
+        "tool_result": {"kind": "list", "label": "지역별 공고 분포", "items": items},
+        "citation": {
+            "type": "sql",
+            "ref": "채용공고·지역",
+            "label": f"지역별 집계 · 공고 {total:,}건",
+        },
+        "n": total,
+        "facts": (
+            f"pool={pool or '전체'} 기준(지역 정보는 국내 공고에만 있음) "
+            f"지역별 공고 분포 — {facts}"
+        ),
+    }
+
+
 def skill_demand(session: Session, skill_name: str, pool: str | None = None) -> dict | None:
     resolved = resolve_skill(session, skill_name)
     if not resolved:

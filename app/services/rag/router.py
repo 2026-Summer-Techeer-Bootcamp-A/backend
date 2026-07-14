@@ -21,6 +21,7 @@ INTENT_TOOLS = {
     "cert_ranking": ["sql"],
     "semantic_search": ["vector"],
     "overview": ["sql"],
+    "region_distribution": ["sql"],
 }
 
 _COOCCUR_KW = ("같이", "함께", "동반", "궁합", "짝", "with", "together", "pair", "combo")
@@ -28,13 +29,14 @@ _SEMANTIC_KW = ("찾아", "추천", "비슷", "유사", "관련 공고", "같은
 _CONCEPT_KW = ("개념", "패러다임", "트렌드", "msa", "마이크로서비스", "생성형", "대규모", "아키텍처", "devops", "ci/cd")
 _CERT_KW = ("자격증", "자격", "cert", "토익", "정보처리")
 _RANK_KW = ("순위", "많이", "상위", "top", "인기", "가장", "수요")
+_REGION_KW = ("어디", "위치", "지역", "몰려", "밀집")
 
 _PLANNER_SYSTEM = (
     "You are a query planner for a Korean job-market RAG. "
     "Classify the user question into exactly one intent and extract entities. "
     "Return ONLY JSON: {\"intent\": one of "
     "[cooccurrence, skill_demand, skill_ranking, concept_ranking, cert_ranking, "
-    "semantic_search, overview], "
+    "semantic_search, overview, region_distribution], "
     "\"skill\": <a single tech name mentioned or null>, "
     "\"pool\": <domestic|global|null>}. "
     "cooccurrence = which techs go together with X. "
@@ -42,6 +44,7 @@ _PLANNER_SYSTEM = (
     "skill_ranking = most demanded techs. concept_ranking = paradigms/concepts. "
     "cert_ranking = certifications. "
     "semantic_search = find/recommend postings similar to a free-form description. "
+    "region_distribution = where postings are concentrated geographically (region/location). "
     "overview = general market summary."
 )
 
@@ -70,6 +73,8 @@ def _heuristic(session: Session, q: str, pool: str | None) -> Plan:
         intent = "cert_ranking"
     elif any(k in low for k in _CONCEPT_KW):
         intent = "concept_ranking"
+    elif any(k in low for k in _REGION_KW):
+        intent = "region_distribution"
     elif skill:
         intent = "skill_demand"
     elif any(k in low for k in _RANK_KW):
