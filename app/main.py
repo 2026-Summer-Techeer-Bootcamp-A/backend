@@ -178,6 +178,64 @@ async def lifespan(app: FastAPI):
             LEFT JOIN category_skill_counts csc
               ON csc.pool = ct.pool AND csc.category = ct.category;
         """))
+
+        # Create mv_global_domestic_gap materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_global_domestic_gap AS
+            WITH pool_totals AS (
+                SELECT
+                    COUNT(*) FILTER (WHERE p.pool = 'global') AS global_total,
+                    COUNT(*) FILTER (WHERE p.pool = 'domestic') AS domestic_total
+                FROM posting p
+                WHERE p.is_deleted = false
+            ),
+            skill_counts AS (
+                SELECT
+                    s.id AS skill_id,
+                    s.canonical,
+                    s.category,
+                    COUNT(DISTINCT p.id) FILTER (WHERE p.pool = 'global') AS global_n,
+                    COUNT(DISTINCT p.id) FILTER (WHERE p.pool = 'domestic') AS domestic_n
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.is_deleted = false
+                  AND p.pool IN ('global', 'domestic')
+                GROUP BY s.id, s.canonical, s.category
+            ),
+            skill_shares AS (
+                SELECT
+                    sc.skill_id,
+                    sc.canonical,
+                    sc.category,
+                    sc.global_n,
+                    sc.domestic_n,
+                    COALESCE(
+                        ROUND(sc.global_n::numeric / NULLIF(pt.global_total, 0) * 100, 2),
+                        0.0
+                    ) AS global_pct,
+                    COALESCE(
+                        ROUND(sc.domestic_n::numeric / NULLIF(pt.domestic_total, 0) * 100, 2),
+                        0.0
+                    ) AS domestic_pct,
+                    pt.global_total,
+                    pt.domestic_total
+                FROM skill_counts sc
+                CROSS JOIN pool_totals pt
+            )
+            SELECT
+                skill_id,
+                canonical,
+                category,
+                global_n,
+                domestic_n,
+                global_pct,
+                domestic_pct,
+                ROUND(global_pct - domestic_pct, 2) AS diff,
+                global_total,
+                domestic_total
+            FROM skill_shares;
+        """))
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)

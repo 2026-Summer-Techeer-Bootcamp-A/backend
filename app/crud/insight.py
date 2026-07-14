@@ -181,30 +181,61 @@ def _pool_skill_shares(session: Session, pool: str) -> tuple[dict[int, dict], in
 
 def get_global_domestic_gap(session: Session, *, limit: int = 20) -> tuple[list[dict], list[dict], int, int]:
     """각 풀 내 점유율 비교. 절대 두 풀을 합산하지 않고, 풀별 share만 비교한다."""
-    global_data, global_total = _pool_skill_shares(session, "global")
-    domestic_data, domestic_total = _pool_skill_shares(session, "domestic")
-
-    all_ids = set(global_data) | set(domestic_data)
-    entries = []
-    for sid in all_ids:
-        g = global_data.get(sid)
-        d = domestic_data.get(sid)
-        base = g or d
-        entries.append(
-            {
-                "canonical": base["canonical"],
-                "category": base["category"],
-                "global_pct": g["pct"] if g else 0.0,
-                "domestic_pct": d["pct"] if d else 0.0,
-                "diff": round((g["pct"] if g else 0.0) - (d["pct"] if d else 0.0), 2),
-                "global_n": g["n"] if g else 0,
-                "domestic_n": d["n"] if d else 0,
-            }
+    item_columns = """
+        canonical,
+        category,
+        global_pct,
+        domestic_pct,
+        diff,
+        global_n,
+        domestic_n
+    """
+    global_favored = [
+        dict(row)
+        for row in session.execute(
+            text(
+                f"""
+                SELECT {item_columns}
+                FROM mv_global_domestic_gap
+                WHERE skill_id IS NOT NULL
+                ORDER BY diff DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
         )
+        .mappings()
+        .all()
+    ]
+    domestic_favored = [
+        dict(row)
+        for row in session.execute(
+            text(
+                f"""
+                SELECT {item_columns}
+                FROM mv_global_domestic_gap
+                WHERE skill_id IS NOT NULL
+                ORDER BY diff ASC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        .mappings()
+        .all()
+    ]
+    totals = session.execute(
+        text(
+            """
+            SELECT global_total, domestic_total
+            FROM mv_global_domestic_gap
+            LIMIT 1
+            """
+        )
+    ).mappings().first()
 
-    global_favored = sorted(entries, key=lambda e: e["diff"], reverse=True)[:limit]
-    domestic_favored = sorted(entries, key=lambda e: e["diff"])[:limit]
-
+    global_total = int(totals["global_total"]) if totals else 0
+    domestic_total = int(totals["domestic_total"]) if totals else 0
     return global_favored, domestic_favored, global_total, domestic_total
 
 
