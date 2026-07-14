@@ -83,3 +83,59 @@ def test_get_job_categories_scoped_to_global_pool(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"categories": [{"name": "frontend", "is_tech": True}]}
+
+
+@pytest.fixture
+def client_with_non_tech_domestic_category() -> Iterator[TestClient]:
+    """pool 스코프에서 is_tech=False 카테고리가 걸러지는지 보기 위한 전용 픽스처.
+
+    기존 client 픽스처를 그대로 재사용하면 pool=None 테스트의 정확한 목록 단언이
+    깨지므로, 비-기술 카테고리(사무보조)를 추가로 태깅한 별도 DB를 구성한다.
+    """
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+    with testing_session() as seed:
+        seed.add_all(
+            [
+                JobCategory(name="backend", is_tech=True),
+                JobCategory(name="사무보조", is_tech=False),
+            ]
+        )
+        seed.commit()
+
+        domestic_posting = Posting(
+            source="jumpit", source_uid="d1", pool="domestic", title="Backend Engineer"
+        )
+        seed.add(domestic_posting)
+        seed.commit()
+        seed.add_all(
+            [
+                PostingCategory(posting_id=domestic_posting.id, category="backend"),
+                PostingCategory(posting_id=domestic_posting.id, category="사무보조"),
+            ]
+        )
+        seed.commit()
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_get_job_categories_scoped_to_domestic_pool_excludes_non_tech(
+    client_with_non_tech_domestic_category: TestClient,
+) -> None:
+    response = client_with_non_tech_domestic_category.get(
+        "/api/v1/job-categories", params={"pool": "domestic"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"categories": [{"name": "backend", "is_tech": True}]}
