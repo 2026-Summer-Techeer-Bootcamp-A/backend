@@ -6,3 +6,4 @@ faker
 bcrypt
 rich
 questionary
+pytest-github-actions-annotate-failures
