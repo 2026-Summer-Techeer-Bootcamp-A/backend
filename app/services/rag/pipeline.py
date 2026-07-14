@@ -62,6 +62,8 @@ def _dispatch(session: Session, p: Plan) -> list[dict]:
         out.append(sql_tool.top_concepts(session, pool))
     elif p.intent == "cert_ranking":
         out.append(sql_tool.top_certs(session, pool))
+    elif p.intent == "region_distribution":
+        out.append(sql_tool.top_locations(session, pool))
 
     if not out:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
         out.append(sql_tool.top_skills(session, pool))
