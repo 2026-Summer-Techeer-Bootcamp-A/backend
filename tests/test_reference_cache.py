@@ -180,3 +180,70 @@ def test_endpoint_caches_and_hit_skips_db(
     assert second.status_code == 200
     assert second.json() == first.json()
     assert calls["n"] == 1  # crud가 다시 불리지 않았다 = 캐시 히트
+
+
+def test_repeat_request_served_from_real_redis_with_expected_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#7: 실제 Redis 명령 구현체(fakeredis)에 대해 미스→히트를 검증한다.
+
+    FakeRedis 스텁이 아니라 실제 setex/get/ttl/keys를 구현한 fakeredis를 써서
+    (1) 캐시 키가 실제로 생기고 (2) TTL이 24h 밴드에 들며 (3) 두 번째 동일
+    요청이 DB를 다시 타지 않는 것을 확인한다.
+    """
+    from collections.abc import Iterator
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session, sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    import app.routers.skills as skills_router
+    from app.core.db import Base
+    from app.models import Skill, SkillAlias
+
+    fakeredis = pytest.importorskip("fakeredis")
+    fake = fakeredis.FakeStrictRedis(decode_responses=True)
+    monkeypatch.setattr(reference_cache, "redis_client", fake)
+
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+    with testing_session() as seed:
+        py = Skill(canonical="Python", category="language", is_ambiguous=False)
+        seed.add(py)
+        seed.flush()
+        seed.add(SkillAlias(skill_id=py.id, alias="python", is_korean=False))
+        seed.commit()
+
+    db_calls = {"n": 0}
+    original = skills_router.search_skills
+
+    def counting_search(*args, **kwargs):
+        db_calls["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(skills_router, "search_skills", counting_search)
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        first = client.get("/skills", params={"q": "py", "limit": 20})
+        second = client.get("/skills", params={"q": "py", "limit": 20})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first.status_code == 200
+    assert first.json()["skills"][0]["canonical"] == "Python"
+    assert second.json() == first.json()  # 히트 응답 스키마 동일
+    assert db_calls["n"] == 1  # 두 번째 요청은 DB를 다시 타지 않았다
+
+    keys = fake.keys("refcache:v1:skills:*")
+    assert len(keys) == 1  # 실제 Redis에 캐시 키가 생성됨
+    ttl = fake.ttl(keys[0])
+    assert 24 * 60 * 60 - 10 <= ttl <= 24 * 60 * 60  # 24h TTL 밴드
