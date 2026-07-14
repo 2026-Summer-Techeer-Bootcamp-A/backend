@@ -15,6 +15,7 @@ from app.models.concept import Concept
 from app.models.posting import Posting, PostingCategory, PostingCert, PostingConcept, PostingTech
 from app.models.skill import Skill
 from app.schemas.feed import FeedMatch, FeedPostingItem
+from app.services.posting_description import normalize_jobkorea_sections
 
 _DESCRIPTION_SNIPPET_MAX_LEN = 300
 # 첫 섹션 텍스트가 이 길이보다 짧으면 다음 섹션도 이어붙여 스니펫을 채운다.
@@ -106,12 +107,18 @@ def _clean_section_text(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def _build_description_snippet(description: str | None) -> str | None:
+def _build_description_snippet(
+    description: str | None, *, source: str | None = None, posting_title: str | None = None
+) -> str | None:
     """Posting.description(JSON 섹션 문자열)에서 피드 카드용 요약 스니펫을 뽑는다.
 
     형식은 get_posting_detail의 desc_sections 파싱과 동일하다:
     `[{"title": .., "text": ..}, ...]`. 값이 없거나 JSON 파싱이 실패하거나
     기대한 형태가 아니면 피드 응답 전체가 죽지 않도록 None을 반환한다.
+
+    jobkorea는 get_posting_detail과 동일하게 normalize_jobkorea_sections로
+    한 번 더 정규화한다 — ETL이 아직 재적재되지 않은 기존 행의 사이트
+    로그인/내비게이션 문구가 피드 카드에도 그대로 새지 않도록 하는 안전망.
     """
     if not description:
         return None
@@ -121,6 +128,9 @@ def _build_description_snippet(description: str | None) -> str | None:
         return None
     if not isinstance(sections, list) or not sections:
         return None
+
+    if source == "jobkorea":
+        sections = normalize_jobkorea_sections(sections, posting_title=posting_title)
 
     parts: list[str] = []
     collected_len = 0
@@ -190,7 +200,9 @@ def _build_feed_items(
                 concepts=concepts_map.get(p.id, []),
                 certs=certs_map.get(p.id, []),
                 seniority=p.seniority_raw,
-                description_snippet=_build_description_snippet(p.description),
+                description_snippet=_build_description_snippet(
+                    p.description, source=p.source, posting_title=p.title
+                ),
                 logo_url=p.logo_url,
                 url=urls.get(p.id, ""),
                 career_min=p.career_min,
