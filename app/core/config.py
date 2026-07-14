@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     # TODO: consumed by the future Redis client setup.
     redis_url: str = "redis://redis:6379/0"
+    search_cache_ttl_seconds: int = 3 * 60 * 60
+    search_cache_socket_timeout_seconds: float = 0.5
 
     resume_parse_max_bytes: int = 10 * 1024 * 1024
     resume_confirm_session_ttl_seconds: int = 3600
