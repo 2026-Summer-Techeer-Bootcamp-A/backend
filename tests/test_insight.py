@@ -178,6 +178,34 @@ def client() -> Iterator[TestClient]:
                 """
             )
         )
+        seed.execute(
+            text(
+                """
+                CREATE TABLE mv_role_stack_fit (
+                    pool TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    skill_canonical TEXT,
+                    posting_count INTEGER NOT NULL,
+                    category_total INTEGER NOT NULL
+                )
+                """
+            )
+        )
+        seed.execute(
+            text(
+                """
+                INSERT INTO mv_role_stack_fit
+                    (pool, category, skill_canonical, posting_count, category_total)
+                VALUES
+                    ('domestic', 'backend', 'Python', 1, 2),
+                    ('domestic', 'backend', 'Java', 1, 2),
+                    ('domestic', 'backend', 'Spring', 2, 2),
+                    ('domestic', 'frontend', 'AWS', 1, 1),
+                    ('global', 'backend', 'Python', 1, 1),
+                    ('global', 'backend', 'AWS', 1, 1)
+                """
+            )
+        )
         seed.commit()
 
     def override_get_session() -> Iterator[Session]:
@@ -347,4 +375,16 @@ def test_role_stack_fit_excludes_non_tech_categories(client: TestClient) -> None
     names = {c["name"] for c in body["categories"]}
     assert "sales" not in names
     assert names == {"backend", "frontend"}
-    assert len(body["matrix"]) == len(body["categories"])
+    assert body["categories"] == [{"name": "backend", "n": 3}, {"name": "frontend", "n": 1}]
+    assert body["matrix"] == [[100.0, 16.7], [16.7, 100.0]]
+    assert body["sample_size"] == 4
+
+
+def test_role_stack_fit_filters_materialized_view_by_pool(client: TestClient) -> None:
+    resp = client.get("/api/v1/stats/role-stack-fit", params={"pool": "global"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["categories"] == [{"name": "backend", "n": 1}]
+    assert body["matrix"] == [[100.0]]
+    assert body["sample_size"] == 1
