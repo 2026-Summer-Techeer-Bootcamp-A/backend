@@ -51,6 +51,7 @@ def read_feed_postings(
     ] = "latest",
     industry: Annotated[str | None, Query(description="업종 부분일치(Posting.industry)")] = None,
     skills: Annotated[str | None, Query(description="쉼표로 구분한 기술명(하나 이상 일치)")] = None,
+    rich_only: Annotated[bool, Query(description="설명이 충분히 상세한 공고만 조회")] = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
     authorization: Annotated[str | None, Header()] = None,
@@ -79,6 +80,7 @@ def read_feed_postings(
         sort=sort,
         skills=[skill.strip() for skill in skills.split(",") if skill.strip()] if skills else None,
         industry=industry,
+        rich_only=rich_only,
     )
     return FeedResponse(
         items=items,
