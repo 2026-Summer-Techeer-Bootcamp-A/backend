@@ -215,10 +215,10 @@ def _apply_posting_filters(
         stmt = stmt.where(Posting.industry.ilike(f"%{industry}%"))
 
     if rich_only:
-        # 소스별 서술형 설명 길이의 실제 분포를 기준으로 정한 임계값이다(빈약한
-        # 쪽 중앙값 ~75-88자, 풍부한 쪽 중앙값 300-4000자+). 데이터 재검증 없이
-        # 바꾸지 않는다.
-        stmt = stmt.where(Posting.description.isnot(None), func.length(Posting.description) >= 200)
+        # 설명 길이 기준은 소스 전체로 보면 유효했지만, 기본 최신순 정렬에서는
+        # 다른 소스의 최근 공고도 대부분 길어서 필터 효과가 체감되지 않았다.
+        # jumpit은 소량(약 742건)이지만 설명이 항상 충실한 소스라 이를 기준으로 삼는다.
+        stmt = stmt.where(Posting.source == "jumpit")
 
     if deadline_within_days is not None:
         today = date.today()

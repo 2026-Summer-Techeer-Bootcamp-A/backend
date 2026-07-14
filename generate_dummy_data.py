@@ -99,11 +99,13 @@ def build_certs():
             continue
         for canon in items:
             if canon not in seen:
-                seen.add(canon); names.append(canon)
+                seen.add(canon)
+                names.append(canon)
     for row in (MARKET.get("certGap", {}).get("required") or []):
         nm = row.get("name")
         if nm and nm not in seen:
-            seen.add(nm); names.append(nm)
+            seen.add(nm)
+            names.append(nm)
     return names
 
 CERT_NAMES = build_certs()
@@ -201,7 +203,8 @@ def get_or_create_dicts(db: Session):
         s = existing.get(canon)
         if not s:
             s = Skill(canonical=canon, category=cat, is_ambiguous=amb)
-            db.add(s); db.flush()
+            db.add(s)
+            db.flush()
             for a in aliases:
                 al = a.strip()
                 if not al or al.lower() in {x.lower() for x in alias_seen}:
@@ -267,7 +270,8 @@ def gen_resumes(db: Session, users, skills, certs):
         r = Resume(user_id=user.id, title=f"{role} 지원 이력서",
                    position=role, career_min=cmin, career_max=cmin + random.randint(1, 8),
                    pool=random.choices(["domestic", "global"], weights=[7, 3])[0])
-        db.add(r); resumes.append(r)
+        db.add(r)
+        resumes.append(r)
         if (i + 1) % 300 == 0:
             db.flush()
     db.flush()
