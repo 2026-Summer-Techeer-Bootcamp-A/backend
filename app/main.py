@@ -95,6 +95,40 @@ async def lifespan(app: FastAPI):
             WHERE p.is_deleted = false
             GROUP BY p.pool, pt1.skill_id, pt2.skill_id, st.skill_total_postings;
         """))
+
+        # Create mv_industry_fingerprint materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_industry_fingerprint AS
+            WITH industry_totals AS (
+                SELECT p.industry, COUNT(*) AS industry_total
+                FROM posting p
+                WHERE p.pool = 'domestic'
+                  AND p.industry IS NOT NULL
+                  AND p.is_deleted = false
+                GROUP BY p.industry
+            ),
+            industry_skill_counts AS (
+                SELECT p.industry, s.canonical AS skill_canonical,
+                       COUNT(DISTINCT p.id) AS posting_count
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.pool = 'domestic'
+                  AND p.industry IS NOT NULL
+                  AND p.is_deleted = false
+                GROUP BY p.industry, s.canonical
+            ),
+            industry_skill_shares AS (
+                SELECT isc.industry, isc.skill_canonical, isc.posting_count,
+                       it.industry_total,
+                       isc.posting_count::float / NULLIF(it.industry_total, 0) AS share
+                FROM industry_skill_counts isc
+                JOIN industry_totals it ON it.industry = isc.industry
+            )
+            SELECT industry, skill_canonical, posting_count, industry_total, share,
+                   AVG(share) OVER (PARTITION BY skill_canonical) AS avg_share
+            FROM industry_skill_shares;
+        """))
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
