@@ -3,6 +3,7 @@
 "React 배우면 뭘 같이?" 류 관계 질문에 정확한 수치로 답한다.
 엣지 = 같은 공고에서 함께 요구된 기술 쌍. strength = 대상 기술 공고 중 동반 비율.
 서브그래프(nodes/edges)를 tool_result.graph 로 반환해 프론트 네트워크 위젯이 렌더.
+2-hop 크로스엣지: 1-hop 이웃들끼리의 공동출현도 함께 반환해 2단 네트워크를 구성한다.
 """
 
 from __future__ import annotations
@@ -41,29 +42,68 @@ def co_occurring_skills(
     if base == 0:
         return None
 
+    # 1-hop: 루트 기술과 직접 공동출현하는 이웃 기술 목록 (skill_id도 함께 조회)
     rows = session.execute(
         text(
-            f"SELECT s2.canonical, COUNT(DISTINCT pt2.posting_id) n "
+            f"SELECT s2.canonical, s2.id, COUNT(DISTINCT pt2.posting_id) n "
             f"FROM posting_tech pt1 "
             f"JOIN posting_tech pt2 ON pt1.posting_id = pt2.posting_id "
             f"  AND pt2.skill_id <> pt1.skill_id AND pt2.is_deleted = false "
             f"JOIN skill s2 ON s2.id = pt2.skill_id "
             f"JOIN posting p ON p.id = pt1.posting_id "
             f"WHERE pt1.skill_id = :sid AND pt1.is_deleted = false AND {_POOL_WHERE} "
-            f"GROUP BY s2.canonical ORDER BY n DESC LIMIT :limit"
+            f"GROUP BY s2.canonical, s2.id ORDER BY n DESC LIMIT :limit"
         ),
         {"sid": skill_id, "pool": pool, "limit": limit},
     ).all()
 
-    items, edges, nodes = [], [], [{"id": canonical, "root": True}]
-    for name, n in rows:
+    items, edges, nodes = [], [], [{"id": canonical, "root": True, "hop": 0}]
+    neighbor_ids: list[int] = []
+    neighbor_names: set[str] = set()
+
+    for name, skill_id_2, n in rows:
         pct = round(100 * int(n) / base, 1)
         items.append({"name": name, "metric": f"{pct}%", "pct": pct})
-        nodes.append({"id": name})
-        edges.append({"source": canonical, "target": name, "strength": pct, "n": int(n)})
+        nodes.append({"id": name, "hop": 1})
+        edges.append({"source": canonical, "target": name, "strength": pct, "n": int(n), "hop": 1})
+        neighbor_ids.append(int(skill_id_2))
+        neighbor_names.add(name)
+
+    # 2-hop 크로스엣지: 이웃 기술들끼리의 공동출현 (이웃 IN × 이웃 IN, pt2.skill_id > pt1.skill_id 로 중복 제거)
+    if len(neighbor_ids) >= 2:
+        id_list = ",".join(str(i) for i in neighbor_ids)
+        cross_rows = session.execute(
+            text(
+                f"SELECT s1.canonical sa, s2.canonical sb, COUNT(DISTINCT pt1.posting_id) n "
+                f"FROM posting_tech pt1 "
+                f"JOIN posting_tech pt2 ON pt1.posting_id = pt2.posting_id "
+                f"  AND pt2.skill_id > pt1.skill_id AND pt2.is_deleted = false "
+                f"JOIN skill s1 ON s1.id = pt1.skill_id "
+                f"JOIN skill s2 ON s2.id = pt2.skill_id "
+                f"JOIN posting p ON p.id = pt1.posting_id "
+                f"WHERE pt1.skill_id IN ({id_list}) "
+                f"  AND pt2.skill_id IN ({id_list}) "
+                f"  AND pt1.is_deleted = false AND {_POOL_WHERE} "
+                f"GROUP BY s1.canonical, s2.canonical "
+                f"ORDER BY n DESC LIMIT 20"
+            ),
+            {"pool": pool},
+        ).all()
+
+        for sa, sb, n_cross in cross_rows:
+            if sa in neighbor_names and sb in neighbor_names:
+                pct_cross = round(100 * int(n_cross) / base, 1)
+                edges.append({
+                    "source": sa,
+                    "target": sb,
+                    "strength": pct_cross,
+                    "n": int(n_cross),
+                    "hop": 2,
+                })
 
     facts = "; ".join(f"{it['name']} {it['pct']}%" for it in items)
     return {
+        "tool": "graph",
         "tool_result": {
             "kind": "graph",
             "label": f"{canonical} 동반 기술(공동출현)",

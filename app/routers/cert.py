@@ -4,6 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from app.core.config import settings
 from app.core.deps import SessionDep
 from app.core.redis import resume_confirm_session_exists
 from app.crud.cert import (
@@ -14,6 +15,7 @@ from app.crud.cert import (
     search_certs,
 )
 from app.schemas.cert import CertGapItem, CertGapResponse, CertItem, CertListResponse, CertRequirementItem
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 
 router = APIRouter()
@@ -21,8 +23,15 @@ router = APIRouter()
 
 @router.get("/certs", response_model=CertListResponse)
 def get_certs(session: SessionDep, q: str | None = None) -> CertListResponse:
+    cache_key = make_reference_cache_key("certs", {"q": q})
+    cached = get_cached(cache_key, CertListResponse)
+    if cached is not None:
+        return cached
+
     certs = search_certs(session, q)
-    return CertListResponse(certs=[CertItem(name=cert.name) for cert in certs])
+    response = CertListResponse(certs=[CertItem(name=cert.name) for cert in certs])
+    set_cached(cache_key, response, settings.reference_cache_ttl_seconds)
+    return response
 
 
 @router.get("/cert/gap", response_model=CertGapResponse)
