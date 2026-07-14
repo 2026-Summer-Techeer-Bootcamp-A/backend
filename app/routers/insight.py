@@ -4,14 +4,17 @@
 """
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, Query
 
 from app.core.deps import SessionDep
 from app.crud.insight import (
+    get_concept_tech,
     get_cooccurrence,
     get_global_domestic_gap,
+    get_global_domestic_lag,
+    get_group_share,
     get_hiring_season,
     get_hot_companies,
     get_hype_vs_hire,
@@ -21,14 +24,18 @@ from app.crud.insight import (
     get_region_density,
     get_response_rate,
     get_role_stack_fit,
+    get_skill_count_dist,
     get_skill_share,
     get_skill_trend_yearly,
     get_skill_unlock,
 )
 from app.routers.match import resolve_optional_owned_skill_ids, resolve_owned_skill_ids
 from app.schemas.insight import (
+    ConceptTechResponse,
     CooccurrenceResponse,
     GlobalDomesticGapResponse,
+    GlobalDomesticLagResponse,
+    GroupShareResponse,
     HiringSeasonResponse,
     HotCompaniesResponse,
     HypeVsHireResponse,
@@ -38,6 +45,7 @@ from app.schemas.insight import (
     RegionDensityResponse,
     ResponseRateResponse,
     RoleStackFitResponse,
+    SkillCountDistResponse,
     SkillShareResponse,
     SkillTrendYearlyResponse,
     SkillUnlockResponse,
@@ -284,4 +292,68 @@ def stats_skill_unlock(
         as_of=date.today().isoformat(),
         sample_size=result["sample_size"],
         sample_warning=True if result["sample_size"] < 50 else None,
+    )
+
+
+@router.get("/stats/group-share", response_model=GroupShareResponse)
+def stats_group_share(
+    session: SessionDep,
+    group: Annotated[Literal["frontend_fw", "backend_fw", "database"], Query(description="스킬 그룹")],
+    pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
+) -> GroupShareResponse:
+    """프레임워크/DB 그룹 내 상대 점유율(그룹 union 공고 기준, 대략치). 전체 공고 대비 비율이 아니다."""
+    result = get_group_share(session=session, group=group, pool=pool)
+    return GroupShareResponse(
+        group=group,
+        pool=pool,
+        union_count=result["union_count"],
+        items=result["items"],
+        as_of=date.today().isoformat(),
+    )
+
+
+@router.get("/stats/concept-tech", response_model=ConceptTechResponse)
+def stats_concept_tech(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
+    top_concepts: Annotated[int, Query(ge=1, le=27, description="상위 개념 수")] = 6,
+    top_techs: Annotated[int, Query(ge=1, le=20, description="개념당 상위 기술 수")] = 5,
+) -> ConceptTechResponse:
+    """개념→기술 Sankey. posting_concept×posting_tech 공동출현 상위 개념 × 개념당 상위 기술."""
+    result = get_concept_tech(session=session, pool=pool, top_concepts=top_concepts, top_techs=top_techs)
+    return ConceptTechResponse(
+        pool=pool,
+        nodes=result["nodes"],
+        links=result["links"],
+        as_of=date.today().isoformat(),
+    )
+
+
+@router.get("/stats/skill-count-dist", response_model=SkillCountDistResponse)
+def stats_skill_count_dist(
+    session: SessionDep,
+    pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
+) -> SkillCountDistResponse:
+    """공고당 요구 스킬 개수 분포(히스토그램) + 평균/중앙값."""
+    result = get_skill_count_dist(session=session, pool=pool)
+    return SkillCountDistResponse(
+        pool=pool,
+        histogram=result["histogram"],
+        avg=result["avg"],
+        median=result["median"],
+        as_of=date.today().isoformat(),
+    )
+
+
+@router.get("/stats/global-domestic-lag", response_model=GlobalDomesticLagResponse)
+def stats_global_domestic_lag(
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=30, description="반환할 기술 수")] = 10,
+) -> GlobalDomesticLagResponse:
+    """글로벌 연도 점유율 추이가 국내를 선행하는 근사 시차(교차상관, lag 0~3년). 표본 부족 기술은 제외."""
+    result = get_global_domestic_lag(session=session, limit=limit)
+    return GlobalDomesticLagResponse(
+        items=result["items"],
+        as_of=date.today().isoformat(),
+        note="근사·교차상관 기반 — 스크래핑 배치 노이즈와 표본 편향으로 정밀한 시차가 아닌 방향성 참고용",
     )
