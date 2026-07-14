@@ -129,6 +129,55 @@ async def lifespan(app: FastAPI):
                    AVG(share) OVER (PARTITION BY skill_canonical) AS avg_share
             FROM industry_skill_shares;
         """))
+
+        # Create mv_role_stack_fit materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_role_stack_fit AS
+            WITH category_totals AS (
+                SELECT
+                    p.pool,
+                    pc.category,
+                    COUNT(DISTINCT p.id) AS category_total
+                FROM posting p
+                JOIN posting_category pc
+                  ON pc.posting_id = p.id AND pc.is_deleted = false
+                JOIN job_category jc
+                  ON jc.name = pc.category
+                 AND jc.is_tech = true
+                 AND jc.is_deleted = false
+                WHERE p.is_deleted = false
+                GROUP BY p.pool, pc.category
+            ),
+            category_skill_counts AS (
+                SELECT
+                    p.pool,
+                    pc.category,
+                    s.canonical AS skill_canonical,
+                    COUNT(DISTINCT p.id) AS posting_count
+                FROM posting p
+                JOIN posting_category pc
+                  ON pc.posting_id = p.id AND pc.is_deleted = false
+                JOIN job_category jc
+                  ON jc.name = pc.category
+                 AND jc.is_tech = true
+                 AND jc.is_deleted = false
+                JOIN posting_tech pt
+                  ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s
+                  ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.is_deleted = false
+                GROUP BY p.pool, pc.category, s.canonical
+            )
+            SELECT
+                ct.pool,
+                ct.category,
+                csc.skill_canonical,
+                COALESCE(csc.posting_count, 0) AS posting_count,
+                ct.category_total
+            FROM category_totals ct
+            LEFT JOIN category_skill_counts csc
+              ON csc.pool = ct.pool AND csc.category = ct.category;
+        """))
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
