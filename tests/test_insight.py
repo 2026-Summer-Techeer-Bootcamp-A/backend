@@ -62,6 +62,26 @@ def client() -> Iterator[TestClient]:
     Base.metadata.create_all(engine)
     testing_session = sessionmaker(bind=engine, expire_on_commit=False)
 
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE mv_global_domestic_gap (
+                    skill_id INTEGER,
+                    canonical TEXT,
+                    category TEXT,
+                    global_n INTEGER,
+                    domestic_n INTEGER,
+                    global_pct FLOAT,
+                    domestic_pct FLOAT,
+                    diff FLOAT,
+                    global_total INTEGER,
+                    domestic_total INTEGER
+                )
+                """
+            )
+        )
+
     with testing_session() as seed:
         python = Skill(canonical="Python", category="language")
         java = Skill(canonical="Java", category="language")
@@ -205,6 +225,29 @@ def client() -> Iterator[TestClient]:
                     ('global', 'backend', 'AWS', 1, 1)
                 """
             )
+        )
+
+        seed.execute(
+            text(
+                """
+                INSERT INTO mv_global_domestic_gap (
+                    skill_id, canonical, category,
+                    global_n, domestic_n,
+                    global_pct, domestic_pct, diff,
+                    global_total, domestic_total
+                ) VALUES
+                    (:python_id, 'Python', 'language', 2, 1, 100.0, 33.33, 66.67, 2, 3),
+                    (:java_id, 'Java', 'language', 0, 1, 0.0, 33.33, -33.33, 2, 3),
+                    (:spring_id, 'Spring', 'framework', 0, 2, 0.0, 66.67, -66.67, 2, 3),
+                    (:aws_id, 'AWS', 'cloud', 1, 1, 50.0, 33.33, 16.67, 2, 3)
+                """
+            ),
+            {
+                "python_id": python.id,
+                "java_id": java.id,
+                "spring_id": spring.id,
+                "aws_id": aws.id,
+            },
         )
         seed.commit()
 
