@@ -260,3 +260,77 @@ class SkillUnlockResponse(BaseModel):
     as_of: str
     sample_size: int
     sample_warning: bool | None = None
+
+
+class GroupShareItem(BaseModel):
+    canonical: str
+    count: int
+    share: float  # percent, 그룹 union 대비(절대 전체 공고 대비 아님)
+
+
+class GroupShareResponse(BaseModel):
+    """프레임워크/DB 그룹 내 상대 점유율. share=count/union_count*100(그룹 union 공고 기준, 대략치)."""
+
+    group: Literal["frontend_fw", "backend_fw", "database"]
+    pool: Literal["global", "domestic"]
+    union_count: int
+    items: list[GroupShareItem]
+    as_of: str
+
+
+class ConceptTechNode(BaseModel):
+    name: str
+    type: Literal["concept", "tech"]
+
+
+class ConceptTechLink(BaseModel):
+    source: str
+    target: str
+    value: int
+
+
+class ConceptTechResponse(BaseModel):
+    """개념→기술 Sankey. posting_concept×posting_tech 공동출현 상위 개념 × 개념당 상위 기술."""
+
+    pool: Literal["global", "domestic"]
+    nodes: list[ConceptTechNode]
+    links: list[ConceptTechLink]
+    as_of: str
+
+
+class SkillCountDistBucket(BaseModel):
+    k: int  # 공고당 요구 스킬 개수
+    count: int  # 그 개수를 가진 공고 수
+
+
+class SkillCountDistResponse(BaseModel):
+    """공고당 요구 스킬 개수 분포 + 평균/중앙값."""
+
+    pool: Literal["global", "domestic"]
+    histogram: list[SkillCountDistBucket]
+    avg: float
+    median: float
+    as_of: str
+
+
+class GlobalDomesticLagPoint(BaseModel):
+    year: int
+    share: float  # percent
+
+
+class GlobalDomesticLagItem(BaseModel):
+    canonical: str
+    lag_years: int  # 0~3, 글로벌이 국내를 이만큼(년) 선행한다고 추정
+    global_series: list[GlobalDomesticLagPoint]
+    domestic_series: list[GlobalDomesticLagPoint]
+
+
+class GlobalDomesticLagResponse(BaseModel):
+    """글로벌 연도 점유율 추이가 국내를 선행하는 근사 시차(교차상관, lag 0~3년).
+
+    표본 부족·시계열 짧은 기술은 제외. 정확도 한계가 있는 근사치이며 참고용.
+    """
+
+    items: list[GlobalDomesticLagItem]
+    as_of: str
+    note: str
