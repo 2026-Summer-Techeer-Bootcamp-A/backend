@@ -689,9 +689,43 @@ def _skill_yearly_counts(session: Session, *, pool: str) -> tuple[dict[str, dict
     return skill_year_count, skill_total, year_denominator
 
 
+def _skill_yearly_counts_from_mv(
+    session: Session, *, pool: str
+) -> tuple[dict[str, dict[int, int]], dict[str, int], dict[int, int]]:
+    """skill-trend-yearly 전용 MV에서 기존 연도별 집계 자료구조를 복원한다."""
+    rows = session.execute(
+        text(
+            """
+            SELECT year, canonical, skill_count, skill_total, year_total
+            FROM mv_skill_trend_yearly
+            WHERE pool = :pool
+            ORDER BY skill_total DESC, canonical ASC, year ASC
+            """
+        ),
+        {"pool": pool},
+    ).mappings().all()
+
+    skill_year_count: dict[str, dict[int, int]] = {}
+    skill_total: dict[str, int] = {}
+    year_denominator: dict[int, int] = {}
+    for row in rows:
+        year = int(row["year"])
+        year_denominator[year] = int(row["year_total"])
+
+        canonical = row["canonical"]
+        if canonical is None:
+            continue
+
+        year_counts = skill_year_count.setdefault(canonical, {})
+        year_counts[year] = int(row["skill_count"])
+        skill_total[canonical] = int(row["skill_total"])
+
+    return skill_year_count, skill_total, year_denominator
+
+
 def get_skill_trend_yearly(session: Session, *, pool: str, top_k: int = 15, movers_limit: int = 5) -> dict:
     """연도별 기술 점유율(연도 내 posting_tech 빈도 / 그 연도 전체 공고 수) + 급상승/급하락 무버스."""
-    skill_year_count, skill_total, year_denominator = _skill_yearly_counts(session, pool=pool)
+    skill_year_count, skill_total, year_denominator = _skill_yearly_counts_from_mv(session, pool=pool)
 
     years = sorted(year_denominator.keys())
 

@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -19,6 +19,22 @@ def client() -> Iterator[TestClient]:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE mv_skill_trend_yearly (
+                    pool TEXT NOT NULL,
+                    year INTEGER NOT NULL,
+                    canonical TEXT,
+                    skill_count INTEGER NOT NULL,
+                    skill_total INTEGER NOT NULL,
+                    year_total INTEGER NOT NULL
+                )
+                """
+            )
+        )
 
     with testing_session() as seed:
         python = Skill(canonical="Python", category="language")
@@ -82,6 +98,19 @@ def client() -> Iterator[TestClient]:
         global_district = Posting(source="wwr", source_uid="gd-1", pool="global", company="GD",
                                    title="X", post_date=None, region_district="홍대")
         seed.add_all(gangnam + [mapo, global_district])
+        seed.execute(
+            text(
+                """
+                INSERT INTO mv_skill_trend_yearly
+                    (pool, year, canonical, skill_count, skill_total, year_total)
+                VALUES
+                    ('global', 2023, 'Python', 2, 3, 2),
+                    ('global', 2024, 'Java', 1, 3, 2),
+                    ('global', 2024, 'Python', 1, 3, 2),
+                    ('global', 2025, 'Java', 2, 3, 2)
+                """
+            )
+        )
         seed.commit()
 
     def override_get_session() -> Iterator[Session]:

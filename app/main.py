@@ -243,6 +243,56 @@ async def lifespan(app: FastAPI):
                 domestic_total
             FROM skill_shares;
         """))
+
+        # Create mv_skill_trend_yearly materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_skill_trend_yearly AS
+            WITH year_totals AS (
+                SELECT
+                    p.pool,
+                    EXTRACT(YEAR FROM p.post_date)::int AS year,
+                    COUNT(*) AS year_total
+                FROM posting p
+                WHERE p.is_deleted = false
+                  AND p.post_date IS NOT NULL
+                GROUP BY p.pool, EXTRACT(YEAR FROM p.post_date)
+            ),
+            skill_year_counts AS (
+                SELECT
+                    p.pool,
+                    EXTRACT(YEAR FROM p.post_date)::int AS year,
+                    s.canonical,
+                    COUNT(*) AS skill_count
+                FROM posting p
+                JOIN posting_tech pt
+                  ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s
+                  ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.is_deleted = false
+                  AND p.post_date IS NOT NULL
+                GROUP BY p.pool, EXTRACT(YEAR FROM p.post_date), s.canonical
+            ),
+            skill_totals AS (
+                SELECT
+                    syc.pool,
+                    syc.canonical,
+                    SUM(syc.skill_count) AS skill_total
+                FROM skill_year_counts syc
+                GROUP BY syc.pool, syc.canonical
+            )
+            SELECT
+                yt.pool,
+                yt.year,
+                syc.canonical,
+                COALESCE(syc.skill_count, 0) AS skill_count,
+                COALESCE(st.skill_total, 0) AS skill_total,
+                yt.year_total
+            FROM year_totals yt
+            LEFT JOIN skill_year_counts syc
+              ON syc.pool = yt.pool AND syc.year = yt.year
+            LEFT JOIN skill_totals st
+              ON st.pool = syc.pool AND st.canonical = syc.canonical;
+        """))
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
