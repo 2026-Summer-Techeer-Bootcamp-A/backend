@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.models import (
     Concept,
     InterestSignal,
-    JobCategory,
     Posting,
     PostingCategory,
     PostingConcept,
@@ -326,23 +325,23 @@ def get_industry_fingerprint(
 def get_role_stack_fit(
     session: Session, *, pool: str | None = None, top_n_categories: int = 6, top_k_skills: int = 20
 ) -> tuple[list[dict], list[list[float]], int]:
-    """직군간 상위 기술 벡터의 가중 자카드(Ruzicka) 유사도. 기술직(job_category.is_tech)만 대상."""
-    base_filters = [
-        Posting.is_deleted.is_(False),
-        PostingCategory.is_deleted.is_(False),
-        JobCategory.is_tech.is_(True),
-        JobCategory.is_deleted.is_(False),
-    ]
-    if pool:
-        base_filters.append(Posting.pool == pool)
-
+    """Read pre-aggregated role skill vectors and calculate Ruzicka similarity."""
+    pool_filter = "WHERE pool = :pool" if pool else ""
+    params = {"pool": pool} if pool else {}
     category_totals_rows = session.execute(
-        select(PostingCategory.category, func.count(distinct(Posting.id)).label("n"))
-        .select_from(Posting)
-        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
-        .join(JobCategory, JobCategory.name == PostingCategory.category)
-        .where(*base_filters)
-        .group_by(PostingCategory.category)
+        text(
+            f"""
+            SELECT category, SUM(category_total) AS n
+            FROM (
+                SELECT pool, category, MAX(category_total) AS category_total
+                FROM mv_role_stack_fit
+                {pool_filter}
+                GROUP BY pool, category
+            ) category_totals
+            GROUP BY category
+            """
+        ),
+        params,
     ).all()
     category_totals = {row.category: row.n for row in category_totals_rows}
     top_categories = sorted(category_totals.items(), key=lambda kv: kv[1], reverse=True)[:top_n_categories]
@@ -351,24 +350,21 @@ def get_role_stack_fit(
         return [], [], 0
 
     rows = session.execute(
-        select(PostingCategory.category, Skill.canonical, func.count(distinct(Posting.id)).label("n"))
-        .select_from(Posting)
-        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
-        .join(PostingTech, PostingTech.posting_id == Posting.id)
-        .join(Skill, Skill.id == PostingTech.skill_id)
-        .join(JobCategory, JobCategory.name == PostingCategory.category)
-        .where(
-            *base_filters,
-            PostingCategory.category.in_(top_category_names),
-            PostingTech.is_deleted.is_(False),
-            Skill.is_deleted.is_(False),
-        )
-        .group_by(PostingCategory.category, Skill.canonical)
+        text(
+            f"""
+            SELECT category, skill_canonical AS canonical, SUM(posting_count) AS n
+            FROM mv_role_stack_fit
+            {pool_filter}
+            GROUP BY category, skill_canonical
+            """
+        ),
+        params,
     ).all()
 
     vectors: dict[str, dict[str, int]] = {c: {} for c in top_category_names}
     for row in rows:
-        vectors[row.category][row.canonical] = row.n
+        if row.category in vectors and row.canonical is not None:
+            vectors[row.category][row.canonical] = row.n
 
     trimmed = {
         c: dict(sorted(v.items(), key=lambda kv: kv[1], reverse=True)[:top_k_skills]) for c, v in vectors.items()
