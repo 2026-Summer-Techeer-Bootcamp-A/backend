@@ -380,7 +380,7 @@ def test_feed_skills_filter_matches_any(client):
 def rich_only_client() -> Iterator[TestClient]:
     """rich_only 필터 전용 fixture. 기본 client fixture는 여러 테스트가 total 값을
     고정 개수로 assert하므로, 거기에 posting을 더 추가하면 그 테스트들이 깨진다.
-    이 fixture는 설명 길이가 짧은 공고 하나, 충분히 긴 공고 하나만 별도로 둔다."""
+    이 fixture는 jumpit 공고 하나, 다른 소스 공고 하나만 별도로 둔다."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -402,26 +402,13 @@ def rich_only_client() -> Iterator[TestClient]:
             description=json.dumps([{"title": "x", "text": "short"}]),
         )
         rich = Posting(
-            source="wanted",
+            source="jumpit",
             source_uid="rich-2",
             pool="domestic",
             company="Rich Co",
             title="Rich Description Posting",
             post_date=today,
-            description=json.dumps(
-                [
-                    {
-                        "title": "업무 소개",
-                        "text": "저희 팀은 대규모 트래픽을 처리하는 백엔드 시스템을 설계하고 운영합니다. "
-                        "신규 입사자는 온보딩 기간 동안 서비스 아키텍처 전반을 학습하며, 이후 주요 도메인의 "
-                        "API 설계와 데이터 모델링, 성능 최적화 업무를 함께 담당하게 됩니다. 협업 문화를 "
-                        "중요하게 생각하며 코드 리뷰와 페어 프로그래밍을 적극 활용합니다. 또한 장애 대응 "
-                        "프로세스를 함께 만들어가며, 모니터링 지표를 기반으로 한 사전 예방적 운영을 지향합니다. "
-                        "입사 후에는 사수와 함께 3개월간 온보딩 프로젝트를 진행하며 실전 감각을 익히게 됩니다.",
-                    }
-                ],
-                ensure_ascii=False,
-            ),
+            description=json.dumps([{"title": "x", "text": "short"}]),
         )
         seed.add_all([sparse, rich])
         seed.commit()
