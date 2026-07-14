@@ -228,6 +228,7 @@ def list_feed_postings(
     sort: str = "latest",
     skills: list[str] | None = None,
     industry: str | None = None,
+    rich_only: bool = False,
 ) -> tuple[list[FeedPostingItem], int]:
     # min_match/sort=match/industry/skills 전부 _apply_posting_filters(app/crud/posting.py)의
     # 상관 서브쿼리·WHERE 절 레벨에서 처리된다 — list_posting_cards와 동일한 헬퍼를
@@ -242,6 +243,7 @@ def list_feed_postings(
         deadline_within_days=deadline_within_days,
         skills=skills,
         industry=industry,
+        rich_only=rich_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
     )
@@ -254,6 +256,7 @@ def list_feed_postings(
         deadline_within_days=deadline_within_days,
         skills=skills,
         industry=industry,
+        rich_only=rich_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
         limit=page_size,
