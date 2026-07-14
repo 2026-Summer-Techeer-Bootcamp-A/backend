@@ -15,9 +15,7 @@ import pytest
 
 from scripts.fix_source_pool import fix_source_pool
 
-pytestmark = pytest.mark.skipif(
-    "DATABASE_URL" not in os.environ, reason="requires a live Postgres (set DATABASE_URL)"
-)
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
