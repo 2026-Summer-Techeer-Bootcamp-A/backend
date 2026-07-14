@@ -159,6 +159,10 @@ def run_collector_job(
         try:
             db.execute(text("REFRESH MATERIALIZED VIEW mv_skill_share;"))
             db.execute(text("REFRESH MATERIALIZED VIEW mv_cooccurrence;"))
+            db.execute(text("REFRESH MATERIALIZED VIEW mv_industry_fingerprint;"))
+            db.execute(text("REFRESH MATERIALIZED VIEW mv_role_stack_fit;"))
+            db.execute(text("REFRESH MATERIALIZED VIEW mv_global_domestic_gap;"))
+            db.execute(text("REFRESH MATERIALIZED VIEW mv_skill_trend_yearly;"))
             db.commit()
         except Exception as e:
             print(f"Error refreshing materialized views: {e}", flush=True)
