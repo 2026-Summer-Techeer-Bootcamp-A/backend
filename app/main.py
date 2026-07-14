@@ -38,7 +38,14 @@ async def lifespan(app: FastAPI):
     
     with engine.begin() as conn:
         conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;'))
-        
+        conn.execute(text('ALTER TABLE "resume" ADD COLUMN IF NOT EXISTS memo TEXT;'))
+        conn.execute(text('ALTER TABLE "resume" ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT false;'))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_resume_user_primary
+            ON "resume" (user_id)
+            WHERE is_primary;
+        """))
+
         # Create mv_skill_share materialized view if not exists
         conn.execute(text("""
             CREATE MATERIALIZED VIEW IF NOT EXISTS mv_skill_share AS
