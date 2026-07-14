@@ -4,9 +4,11 @@ from datetime import date
 
 from fastapi import APIRouter, Query
 
+from app.core.config import settings
 from app.core.deps import SessionDep
 from app.crud.company import find_skill_id, get_companies_by_skill
 from app.schemas.company import CompanyBySkillResponse, CompanyEntry
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 router = APIRouter()
 
@@ -27,12 +29,17 @@ def companies_by_skill(
 
     response_rate(F11)는 원티드 공고에만 존재하며, 다른 출처 기업은 null일 수 있습니다.
     """
+    cache_key = make_reference_cache_key("company-by-skill", {"skill": skill, "pool": pool})
+    cached = get_cached(cache_key, CompanyBySkillResponse)
+    if cached is not None:
+        return cached
+
     skill_id = find_skill_id(session, skill)
 
     if skill_id is None:
         # 사전에 없는 기술 → 빈 결과 (에러가 아님)
         today = date.today().isoformat()
-        return CompanyBySkillResponse(
+        response = CompanyBySkillResponse(
             skill=skill,
             split_date=today,
             present=[],
@@ -40,6 +47,8 @@ def companies_by_skill(
             as_of=today,
             domestic_note=DOMESTIC_NOTE if pool == "domestic" else None,
         )
+        set_cached(cache_key, response, settings.company_by_skill_cache_ttl_seconds)
+        return response
 
     split_date, as_of, present_rows, past_rows = get_companies_by_skill(
         session=session,
@@ -47,7 +56,7 @@ def companies_by_skill(
         pool=pool,
     )
 
-    return CompanyBySkillResponse(
+    response = CompanyBySkillResponse(
         skill=skill,
         split_date=split_date.isoformat(),
         present=[CompanyEntry(**row) for row in present_rows],
@@ -55,3 +64,5 @@ def companies_by_skill(
         as_of=as_of.isoformat(),
         domestic_note=DOMESTIC_NOTE if pool == "domestic" else None,
     )
+    set_cached(cache_key, response, settings.company_by_skill_cache_ttl_seconds)
+    return response

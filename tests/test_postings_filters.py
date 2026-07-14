@@ -59,22 +59,9 @@ def client() -> Iterator[TestClient]:
             description=json.dumps([{"title": "x", "text": "short"}]),
         )
         rich_desc = Posting(
-            source="wanted", source_uid="w3", pool="domestic", company="Rich Co",
+            source="jumpit", source_uid="j3", pool="domestic", company="Rich Co",
             title="Rich Description Posting", post_date=date(2026, 7, 1),
-            description=json.dumps(
-                [
-                    {
-                        "title": "업무 소개",
-                        "text": "저희 팀은 대규모 트래픽을 처리하는 백엔드 시스템을 설계하고 운영합니다. "
-                        "신규 입사자는 온보딩 기간 동안 서비스 아키텍처 전반을 학습하며, 이후 주요 도메인의 "
-                        "API 설계와 데이터 모델링, 성능 최적화 업무를 함께 담당하게 됩니다. 협업 문화를 "
-                        "중요하게 생각하며 코드 리뷰와 페어 프로그래밍을 적극 활용합니다. 또한 장애 대응 "
-                        "프로세스를 함께 만들어가며, 모니터링 지표를 기반으로 한 사전 예방적 운영을 지향합니다. "
-                        "입사 후에는 사수와 함께 3개월간 온보딩 프로젝트를 진행하며 실전 감각을 익히게 됩니다.",
-                    }
-                ],
-                ensure_ascii=False,
-            ),
+            description=json.dumps([{"title": "x", "text": "short"}]),
         )
         seed.add_all([gangnam_urgent, gangnam_far, mapo, sparse_desc, rich_desc])
         seed.commit()
@@ -136,7 +123,7 @@ def test_skills_filter_matches_any(client: TestClient) -> None:
     assert companies == {"Woowa", "Kakao"}
 
 
-def test_rich_only_filter_excludes_sparse_descriptions(client: TestClient) -> None:
+def test_rich_only_filter_includes_only_jumpit(client: TestClient) -> None:
     resp = client.get("/api/v1/postings", params={"pool": "domestic", "rich_only": True})
     assert resp.status_code == 200
     companies = {item["company"] for item in resp.json()["items"]}

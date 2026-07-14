@@ -8,11 +8,26 @@ import statistics
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, distinct, func, select, text
+from sqlalchemy import bindparam, case, distinct, func, select, text
 from sqlalchemy.orm import Session
 
-from app.models import InterestSignal, JobCategory, Posting, PostingCategory, PostingTech, Skill
+from app.models import (
+    Concept,
+    InterestSignal,
+    Posting,
+    PostingCategory,
+    PostingConcept,
+    PostingTech,
+    Skill,
+)
 from app.services.match import build_posting_pool_query, get_skill_id_by_canonical
+
+# 그룹내 상대 점유(§5 group-share) 대상 스킬 세트. 프론트/백엔드/DB 그룹은 서버 상수로 고정한다.
+GROUP_SKILLS: dict[str, list[str]] = {
+    "frontend_fw": ["React", "Vue", "Angular", "Next.js", "Svelte"],
+    "backend_fw": ["Spring", "Node.js", "Django", "FastAPI", "Express", "NestJS", ".NET", "Flask", "Laravel"],
+    "database": ["MySQL", "PostgreSQL", "MongoDB", "Redis", "MariaDB", "Oracle", "SQLite"],
+}
 
 
 def _quarter_of(d: date) -> str:
@@ -166,53 +181,93 @@ def _pool_skill_shares(session: Session, pool: str) -> tuple[dict[int, dict], in
 
 def get_global_domestic_gap(session: Session, *, limit: int = 20) -> tuple[list[dict], list[dict], int, int]:
     """각 풀 내 점유율 비교. 절대 두 풀을 합산하지 않고, 풀별 share만 비교한다."""
-    global_data, global_total = _pool_skill_shares(session, "global")
-    domestic_data, domestic_total = _pool_skill_shares(session, "domestic")
-
-    all_ids = set(global_data) | set(domestic_data)
-    entries = []
-    for sid in all_ids:
-        g = global_data.get(sid)
-        d = domestic_data.get(sid)
-        base = g or d
-        entries.append(
-            {
-                "canonical": base["canonical"],
-                "category": base["category"],
-                "global_pct": g["pct"] if g else 0.0,
-                "domestic_pct": d["pct"] if d else 0.0,
-                "diff": round((g["pct"] if g else 0.0) - (d["pct"] if d else 0.0), 2),
-                "global_n": g["n"] if g else 0,
-                "domestic_n": d["n"] if d else 0,
-            }
+    item_columns = """
+        canonical,
+        category,
+        global_pct,
+        domestic_pct,
+        diff,
+        global_n,
+        domestic_n
+    """
+    global_favored = [
+        dict(row)
+        for row in session.execute(
+            text(
+                f"""
+                SELECT {item_columns}
+                FROM mv_global_domestic_gap
+                WHERE skill_id IS NOT NULL
+                ORDER BY diff DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
         )
+        .mappings()
+        .all()
+    ]
+    domestic_favored = [
+        dict(row)
+        for row in session.execute(
+            text(
+                f"""
+                SELECT {item_columns}
+                FROM mv_global_domestic_gap
+                WHERE skill_id IS NOT NULL
+                ORDER BY diff ASC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+        .mappings()
+        .all()
+    ]
+    totals = session.execute(
+        text(
+            """
+            SELECT global_total, domestic_total
+            FROM mv_global_domestic_gap
+            LIMIT 1
+            """
+        )
+    ).mappings().first()
 
-    global_favored = sorted(entries, key=lambda e: e["diff"], reverse=True)[:limit]
-    domestic_favored = sorted(entries, key=lambda e: e["diff"])[:limit]
-
+    global_total = int(totals["global_total"]) if totals else 0
+    domestic_total = int(totals["domestic_total"]) if totals else 0
     return global_favored, domestic_favored, global_total, domestic_total
 
 
 def get_hiring_season(session: Session) -> tuple[list[dict], dict[str, int]]:
     """월별 채용 성수기 지수. himalayas(단일 스냅샷) 제외, 진행 중인 올해 제외."""
     current_year = date.today().year
+    post_year = func.extract("year", Posting.post_date)
+    post_month = func.extract("month", Posting.post_date)
 
     rows = session.execute(
-        select(Posting.pool, Posting.post_date).where(
+        select(
+            Posting.pool,
+            post_month.label("month"),
+            func.count(Posting.id).label("n"),
+        )
+        .where(
             Posting.source != "himalayas",
             Posting.post_date.isnot(None),
+            post_year != current_year,
             Posting.pool.in_(("global", "domestic")),
             Posting.is_deleted.is_(False),
         )
+        .group_by(Posting.pool, post_month)
     ).all()
 
     counts: dict[tuple[str, int], int] = {}
     pool_totals: dict[str, int] = {"global": 0, "domestic": 0}
-    for pool, post_date in rows:
-        if post_date.year == current_year:
-            continue
-        counts[(pool, post_date.month)] = counts.get((pool, post_date.month), 0) + 1
-        pool_totals[pool] += 1
+    for pool, month, n in rows:
+        month_number = int(month)
+        count = int(n)
+        counts[(pool, month_number)] = count
+        pool_totals[pool] += count
 
     months = []
     for m in range(1, 13):
@@ -236,81 +291,88 @@ def get_hiring_season(session: Session) -> tuple[list[dict], dict[str, int]]:
 def get_industry_fingerprint(
     session: Session, *, limit_industries: int = 8, limit_skills: int = 8
 ) -> tuple[list[dict], int]:
-    """산업별 기술 지문. index = 산업 내 비중 / 전 산업 평균 비중(그 기술이 등장하는 산업들 기준)."""
-    base_filters = [
-        Posting.pool == "domestic",
-        Posting.industry.isnot(None),
-        Posting.is_deleted.is_(False),
-    ]
-
-    industry_totals_rows = session.execute(
-        select(Posting.industry, func.count().label("n")).where(*base_filters).group_by(Posting.industry)
+    """Read the pre-aggregated domestic industry fingerprint materialized view."""
+    top_industries = session.execute(
+        text(
+            """
+            SELECT industry, MAX(industry_total) AS industry_total
+            FROM mv_industry_fingerprint
+            GROUP BY industry
+            ORDER BY industry_total DESC, industry ASC
+            LIMIT :limit_industries
+            """
+        ),
+        {"limit_industries": limit_industries},
     ).all()
-    industry_totals = {row.industry: row.n for row in industry_totals_rows}
-    if not industry_totals:
+    if not top_industries:
         return [], 0
 
+    industry_names = [row.industry for row in top_industries]
     rows = session.execute(
-        select(Posting.industry, Skill.canonical, func.count(distinct(Posting.id)).label("n"))
-        .select_from(Posting)
-        .join(PostingTech, PostingTech.posting_id == Posting.id)
-        .join(Skill, Skill.id == PostingTech.skill_id)
-        .where(*base_filters, PostingTech.is_deleted.is_(False), Skill.is_deleted.is_(False))
-        .group_by(Posting.industry, Skill.canonical)
+        text(
+            """
+            SELECT industry, skill_canonical, posting_count, share, avg_share
+            FROM mv_industry_fingerprint
+            WHERE industry IN :industry_names
+            ORDER BY industry ASC,
+                     (share / NULLIF(avg_share, 0)) DESC,
+                     skill_canonical ASC
+            """
+        ).bindparams(bindparam("industry_names", expanding=True)),
+        {"industry_names": industry_names},
     ).all()
 
-    shares: dict[str, dict[str, dict]] = {}
-    skill_industry_shares: dict[str, list[float]] = {}
+    signatures: dict[str, list[dict]] = {name: [] for name in industry_names}
     for row in rows:
-        share = row.n / industry_totals[row.industry]
-        shares.setdefault(row.industry, {})[row.canonical] = {"n": row.n, "share": share}
-        skill_industry_shares.setdefault(row.canonical, []).append(share)
-
-    avg_share = {skill: sum(vals) / len(vals) for skill, vals in skill_industry_shares.items()}
-
-    top_industries = sorted(industry_totals.items(), key=lambda kv: kv[1], reverse=True)[:limit_industries]
-
-    industries_out = []
-    for industry_name, n in top_industries:
-        signature = []
-        for skill_name, info in shares.get(industry_name, {}).items():
-            avg = avg_share.get(skill_name, 0)
-            if avg <= 0:
-                continue
-            signature.append(
+        if row.avg_share and len(signatures[row.industry]) < limit_skills:
+            signatures[row.industry].append(
                 {
-                    "canonical": skill_name,
-                    "index": round(info["share"] / avg, 2),
-                    "share_pct": round(info["share"] * 100, 1),
-                    "n": info["n"],
+                    "canonical": row.skill_canonical,
+                    "index": round(row.share / row.avg_share, 2),
+                    "share_pct": round(row.share * 100, 1),
+                    "n": row.posting_count,
                 }
             )
-        signature.sort(key=lambda s: s["index"], reverse=True)
-        industries_out.append({"name": industry_name, "n": n, "signature": signature[:limit_skills]})
 
-    return industries_out, sum(industry_totals.values())
+    industries_out = [
+        {"name": row.industry, "n": row.industry_total, "signature": signatures[row.industry]}
+        for row in top_industries
+    ]
+    sample_size = session.execute(
+        text(
+            """
+            SELECT COALESCE(SUM(industry_total), 0)
+            FROM (
+                SELECT industry, MAX(industry_total) AS industry_total
+                FROM mv_industry_fingerprint
+                GROUP BY industry
+            ) totals
+            """
+        )
+    ).scalar_one()
+    return industries_out, sample_size
 
 
 def get_role_stack_fit(
     session: Session, *, pool: str | None = None, top_n_categories: int = 6, top_k_skills: int = 20
 ) -> tuple[list[dict], list[list[float]], int]:
-    """직군간 상위 기술 벡터의 가중 자카드(Ruzicka) 유사도. 기술직(job_category.is_tech)만 대상."""
-    base_filters = [
-        Posting.is_deleted.is_(False),
-        PostingCategory.is_deleted.is_(False),
-        JobCategory.is_tech.is_(True),
-        JobCategory.is_deleted.is_(False),
-    ]
-    if pool:
-        base_filters.append(Posting.pool == pool)
-
+    """Read pre-aggregated role skill vectors and calculate Ruzicka similarity."""
+    pool_filter = "WHERE pool = :pool" if pool else ""
+    params = {"pool": pool} if pool else {}
     category_totals_rows = session.execute(
-        select(PostingCategory.category, func.count(distinct(Posting.id)).label("n"))
-        .select_from(Posting)
-        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
-        .join(JobCategory, JobCategory.name == PostingCategory.category)
-        .where(*base_filters)
-        .group_by(PostingCategory.category)
+        text(
+            f"""
+            SELECT category, SUM(category_total) AS n
+            FROM (
+                SELECT pool, category, MAX(category_total) AS category_total
+                FROM mv_role_stack_fit
+                {pool_filter}
+                GROUP BY pool, category
+            ) category_totals
+            GROUP BY category
+            """
+        ),
+        params,
     ).all()
     category_totals = {row.category: row.n for row in category_totals_rows}
     top_categories = sorted(category_totals.items(), key=lambda kv: kv[1], reverse=True)[:top_n_categories]
@@ -319,24 +381,21 @@ def get_role_stack_fit(
         return [], [], 0
 
     rows = session.execute(
-        select(PostingCategory.category, Skill.canonical, func.count(distinct(Posting.id)).label("n"))
-        .select_from(Posting)
-        .join(PostingCategory, PostingCategory.posting_id == Posting.id)
-        .join(PostingTech, PostingTech.posting_id == Posting.id)
-        .join(Skill, Skill.id == PostingTech.skill_id)
-        .join(JobCategory, JobCategory.name == PostingCategory.category)
-        .where(
-            *base_filters,
-            PostingCategory.category.in_(top_category_names),
-            PostingTech.is_deleted.is_(False),
-            Skill.is_deleted.is_(False),
-        )
-        .group_by(PostingCategory.category, Skill.canonical)
+        text(
+            f"""
+            SELECT category, skill_canonical AS canonical, SUM(posting_count) AS n
+            FROM mv_role_stack_fit
+            {pool_filter}
+            GROUP BY category, skill_canonical
+            """
+        ),
+        params,
     ).all()
 
     vectors: dict[str, dict[str, int]] = {c: {} for c in top_category_names}
     for row in rows:
-        vectors[row.category][row.canonical] = row.n
+        if row.category in vectors and row.canonical is not None:
+            vectors[row.category][row.canonical] = row.n
 
     trimmed = {
         c: dict(sorted(v.items(), key=lambda kv: kv[1], reverse=True)[:top_k_skills]) for c, v in vectors.items()
@@ -594,8 +653,8 @@ def get_response_rate(session: Session, *, pool: str, company_limit: int = 20) -
     }
 
 
-def get_skill_trend_yearly(session: Session, *, pool: str, top_k: int = 15, movers_limit: int = 5) -> dict:
-    """연도별 기술 점유율(연도 내 posting_tech 빈도 / 그 연도 전체 공고 수) + 급상승/급하락 무버스."""
+def _skill_yearly_counts(session: Session, *, pool: str) -> tuple[dict[str, dict[int, int]], dict[str, int], dict[int, int]]:
+    """기술별 연도별 등장 횟수(skill_year_count), 기술별 총 등장 수(skill_total), 연도별 전체 공고 수(year_denominator)."""
     rows = session.execute(
         select(Posting.post_date, Skill.canonical)
         .select_from(Posting)
@@ -626,6 +685,47 @@ def get_skill_trend_yearly(session: Session, *, pool: str, top_k: int = 15, move
     year_denominator: dict[int, int] = {}
     for (post_date,) in year_posting_rows:
         year_denominator[post_date.year] = year_denominator.get(post_date.year, 0) + 1
+
+    return skill_year_count, skill_total, year_denominator
+
+
+def _skill_yearly_counts_from_mv(
+    session: Session, *, pool: str
+) -> tuple[dict[str, dict[int, int]], dict[str, int], dict[int, int]]:
+    """skill-trend-yearly 전용 MV에서 기존 연도별 집계 자료구조를 복원한다."""
+    rows = session.execute(
+        text(
+            """
+            SELECT year, canonical, skill_count, skill_total, year_total
+            FROM mv_skill_trend_yearly
+            WHERE pool = :pool
+            ORDER BY skill_total DESC, canonical ASC, year ASC
+            """
+        ),
+        {"pool": pool},
+    ).mappings().all()
+
+    skill_year_count: dict[str, dict[int, int]] = {}
+    skill_total: dict[str, int] = {}
+    year_denominator: dict[int, int] = {}
+    for row in rows:
+        year = int(row["year"])
+        year_denominator[year] = int(row["year_total"])
+
+        canonical = row["canonical"]
+        if canonical is None:
+            continue
+
+        year_counts = skill_year_count.setdefault(canonical, {})
+        year_counts[year] = int(row["skill_count"])
+        skill_total[canonical] = int(row["skill_total"])
+
+    return skill_year_count, skill_total, year_denominator
+
+
+def get_skill_trend_yearly(session: Session, *, pool: str, top_k: int = 15, movers_limit: int = 5) -> dict:
+    """연도별 기술 점유율(연도 내 posting_tech 빈도 / 그 연도 전체 공고 수) + 급상승/급하락 무버스."""
+    skill_year_count, skill_total, year_denominator = _skill_yearly_counts_from_mv(session, pool=pool)
 
     years = sorted(year_denominator.keys())
 
@@ -772,3 +872,243 @@ def get_skill_unlock(
         "candidates": candidates[:candidate_limit],
         "sample_size": len(posting_skills),
     }
+
+
+def get_group_share(session: Session, *, group: str, pool: str) -> dict:
+    """프레임워크/DB 그룹 내 상대 점유율. share=count/union_count(그룹 스킬 중 하나라도 걸린 공고 수) 기준.
+
+    절대 전체 공고 대비 비율이 아니다 — 그룹끼리 비교 목적(예: 프론트 프레임워크 판도).
+    """
+    skills = GROUP_SKILLS[group]
+
+    base_filters = [
+        PostingTech.is_deleted.is_(False),
+        Skill.is_deleted.is_(False),
+        Skill.canonical.in_(skills),
+        Posting.pool == pool,
+        Posting.is_deleted.is_(False),
+    ]
+
+    union_count = (
+        session.scalar(
+            select(func.count(distinct(PostingTech.posting_id)))
+            .select_from(PostingTech)
+            .join(Skill, Skill.id == PostingTech.skill_id)
+            .join(Posting, Posting.id == PostingTech.posting_id)
+            .where(*base_filters)
+        )
+        or 0
+    )
+
+    if union_count == 0:
+        return {"union_count": 0, "items": []}
+
+    rows = session.execute(
+        select(Skill.canonical, func.count(distinct(PostingTech.posting_id)).label("n"))
+        .select_from(PostingTech)
+        .join(Skill, Skill.id == PostingTech.skill_id)
+        .join(Posting, Posting.id == PostingTech.posting_id)
+        .where(*base_filters)
+        .group_by(Skill.canonical)
+        .order_by(func.count(distinct(PostingTech.posting_id)).desc())
+    ).all()
+
+    items = [
+        {"canonical": row.canonical, "count": row.n, "share": round(100 * row.n / union_count, 1)} for row in rows
+    ]
+
+    return {"union_count": union_count, "items": items}
+
+
+def get_concept_tech(session: Session, *, pool: str, top_concepts: int = 6, top_techs: int = 5) -> dict:
+    """개념→기술 Sankey. posting_concept×posting_tech 공동출현 상위 개념 N × 개념당 상위 기술 M."""
+    concept_rows = session.execute(
+        select(Concept.id, Concept.name, func.count(distinct(PostingConcept.posting_id)).label("n"))
+        .select_from(PostingConcept)
+        .join(Concept, Concept.id == PostingConcept.concept_id)
+        .join(Posting, Posting.id == PostingConcept.posting_id)
+        .where(
+            PostingConcept.is_deleted.is_(False),
+            Concept.is_deleted.is_(False),
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+        )
+        .group_by(Concept.id, Concept.name)
+        .order_by(func.count(distinct(PostingConcept.posting_id)).desc())
+        .limit(top_concepts)
+    ).all()
+
+    if not concept_rows:
+        return {"nodes": [], "links": []}
+
+    concept_ids = [row.id for row in concept_rows]
+    concept_names = {row.id: row.name for row in concept_rows}
+
+    tech_rows = session.execute(
+        select(
+            PostingConcept.concept_id,
+            Skill.canonical,
+            func.count(distinct(PostingTech.posting_id)).label("n"),
+        )
+        .select_from(PostingConcept)
+        .join(PostingTech, PostingTech.posting_id == PostingConcept.posting_id)
+        .join(Skill, Skill.id == PostingTech.skill_id)
+        .join(Posting, Posting.id == PostingConcept.posting_id)
+        .where(
+            PostingConcept.is_deleted.is_(False),
+            PostingTech.is_deleted.is_(False),
+            Skill.is_deleted.is_(False),
+            Posting.pool == pool,
+            Posting.is_deleted.is_(False),
+            PostingConcept.concept_id.in_(concept_ids),
+        )
+        .group_by(PostingConcept.concept_id, Skill.canonical)
+    ).all()
+
+    by_concept: dict[int, list[tuple[str, int]]] = {}
+    for concept_id, canonical, n in tech_rows:
+        by_concept.setdefault(concept_id, []).append((canonical, n))
+
+    nodes: dict[str, dict] = {}
+    links: list[dict] = []
+    for concept_id in concept_ids:
+        cname = concept_names[concept_id]
+        nodes[cname] = {"name": cname, "type": "concept"}
+        top = sorted(by_concept.get(concept_id, []), key=lambda t: t[1], reverse=True)[:top_techs]
+        for tech_name, n in top:
+            nodes.setdefault(tech_name, {"name": tech_name, "type": "tech"})
+            links.append({"source": cname, "target": tech_name, "value": n})
+
+    return {"nodes": list(nodes.values()), "links": links}
+
+
+def get_skill_count_dist(session: Session, *, pool: str) -> dict:
+    """공고당 요구 스킬 개수 분포(히스토그램) + 평균/중앙값. posting_tech가 하나도 없는 공고는 제외한다."""
+    rows = session.execute(
+        text(
+            """
+            SELECT cnt, COUNT(*) AS n
+            FROM (
+                SELECT p.id, COUNT(pt.skill_id) AS cnt
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+                WHERE p.pool = :pool AND p.is_deleted = false
+                GROUP BY p.id
+            ) t
+            GROUP BY cnt
+            ORDER BY cnt
+            """
+        ),
+        {"pool": pool},
+    ).all()
+
+    histogram = [{"k": int(row.cnt), "count": int(row.n)} for row in rows]
+    total_postings = sum(h["count"] for h in histogram)
+    if total_postings == 0:
+        return {"histogram": [], "avg": 0.0, "median": 0.0}
+
+    total_skills = sum(h["k"] * h["count"] for h in histogram)
+    avg = round(total_skills / total_postings, 1)
+
+    expanded = [h["k"] for h in histogram for _ in range(h["count"])]
+    median = float(statistics.median(expanded))
+
+    return {"histogram": histogram, "avg": avg, "median": median}
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    n = len(xs)
+    if n < 2:
+        return None
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True))
+    den_x = sum((x - mean_x) ** 2 for x in xs) ** 0.5
+    den_y = sum((y - mean_y) ** 2 for y in ys) ** 0.5
+    if den_x == 0 or den_y == 0:
+        return None
+    return num / (den_x * den_y)
+
+
+def _best_lag(
+    global_shares: list[float], domestic_shares: list[float], *, max_lag: int, min_overlap: int = 4
+) -> int | None:
+    """global이 domestic을 lag년만큼 선행한다고 가정하고 0~max_lag 중 상관 최대인 lag를 근사 추정한다.
+
+    두 시계열은 이미 동일한 연도축으로 정렬돼 있어야 한다(같은 길이, 인덱스=연도 순서).
+    표본이 min_overlap년 미만으로 줄어드는 lag는 후보에서 제외한다.
+    """
+    n = len(global_shares)
+    best_lag = None
+    best_corr = None
+    for lag in range(0, max_lag + 1):
+        overlap = n - lag
+        if overlap < min_overlap:
+            break
+        corr = _pearson(global_shares[:overlap], domestic_shares[lag : lag + overlap])
+        if corr is None:
+            continue
+        if best_corr is None or corr > best_corr:
+            best_corr = corr
+            best_lag = lag
+    return best_lag
+
+
+def get_global_domestic_lag(
+    session: Session,
+    *,
+    limit: int = 10,
+    min_postings: int = 200,
+    min_years: int = 5,
+    max_lag: int = 3,
+) -> dict:
+    """기술별 글로벌 연도 점유율 추이가 국내를 선행하는 근사 시차(교차상관, lag 0~3년).
+
+    양 풀 모두 표본(min_postings)·연도 폭(min_years)이 충분한 기술만 대상으로 하며,
+    스크래핑 배치 노이즈·표본 편향으로 lag는 정밀한 값이 아닌 방향성 참고용 근사치다.
+    """
+    g_year_count, g_total, g_year_denom = _skill_yearly_counts(session, pool="global")
+    d_year_count, d_total, d_year_denom = _skill_yearly_counts(session, pool="domestic")
+
+    g_years = sorted(g_year_denom.keys())
+    d_years = sorted(d_year_denom.keys())
+    common_years = sorted(set(g_years) & set(d_years))
+    if len(common_years) < min_years:
+        return {"items": []}
+
+    candidates = [
+        canonical
+        for canonical in set(g_total) & set(d_total)
+        if g_total[canonical] >= min_postings and d_total[canonical] >= min_postings
+    ]
+
+    def _series(year_counts: dict[int, int], years: list[int], denom: dict[int, int]) -> list[float]:
+        return [round(year_counts.get(y, 0) / denom[y] * 100, 2) if denom.get(y) else 0.0 for y in years]
+
+    items = []
+    for canonical in candidates:
+        g_shares_full = _series(g_year_count.get(canonical, {}), g_years, g_year_denom)
+        d_shares_full = _series(d_year_count.get(canonical, {}), d_years, d_year_denom)
+
+        g_common = [g_shares_full[g_years.index(y)] for y in common_years]
+        d_common = [d_shares_full[d_years.index(y)] for y in common_years]
+
+        lag = _best_lag(g_common, d_common, max_lag=max_lag)
+        if lag is None:
+            continue
+
+        items.append(
+            {
+                "canonical": canonical,
+                "lag_years": lag,
+                "global_series": [{"year": y, "share": s} for y, s in zip(g_years, g_shares_full, strict=True)],
+                "domestic_series": [{"year": y, "share": s} for y, s in zip(d_years, d_shares_full, strict=True)],
+                "_sample": g_total[canonical] + d_total[canonical],
+            }
+        )
+
+    items.sort(key=lambda i: i["_sample"], reverse=True)
+    for item in items:
+        del item["_sample"]
+
+    return {"items": items[:limit]}

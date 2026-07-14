@@ -38,6 +38,13 @@ async def lifespan(app: FastAPI):
     
     with engine.begin() as conn:
         conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;'))
+        conn.execute(text('ALTER TABLE "resume" ADD COLUMN IF NOT EXISTS memo TEXT;'))
+        conn.execute(text('ALTER TABLE "resume" ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT false;'))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_resume_user_primary
+            ON "resume" (user_id)
+            WHERE is_primary;
+        """))
 
         # 복합 인덱스로 대체된 단일 컬럼 인덱스 정리(perf/db-index-tuning).
         # 실제 쿼리 패턴(app/crud/insight.py, app/crud/github_insight.py) 기준으로
@@ -124,6 +131,197 @@ async def lifespan(app: FastAPI):
             JOIN skill_totals st ON st.pool = p.pool AND st.skill_id = pt1.skill_id
             WHERE p.is_deleted = false
             GROUP BY p.pool, pt1.skill_id, pt2.skill_id, st.skill_total_postings;
+        """))
+
+        # Create mv_industry_fingerprint materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_industry_fingerprint AS
+            WITH industry_totals AS (
+                SELECT p.industry, COUNT(*) AS industry_total
+                FROM posting p
+                WHERE p.pool = 'domestic'
+                  AND p.industry IS NOT NULL
+                  AND p.is_deleted = false
+                GROUP BY p.industry
+            ),
+            industry_skill_counts AS (
+                SELECT p.industry, s.canonical AS skill_canonical,
+                       COUNT(DISTINCT p.id) AS posting_count
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.pool = 'domestic'
+                  AND p.industry IS NOT NULL
+                  AND p.is_deleted = false
+                GROUP BY p.industry, s.canonical
+            ),
+            industry_skill_shares AS (
+                SELECT isc.industry, isc.skill_canonical, isc.posting_count,
+                       it.industry_total,
+                       isc.posting_count::float / NULLIF(it.industry_total, 0) AS share
+                FROM industry_skill_counts isc
+                JOIN industry_totals it ON it.industry = isc.industry
+            )
+            SELECT industry, skill_canonical, posting_count, industry_total, share,
+                   AVG(share) OVER (PARTITION BY skill_canonical) AS avg_share
+            FROM industry_skill_shares;
+        """))
+
+        # Create mv_role_stack_fit materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_role_stack_fit AS
+            WITH category_totals AS (
+                SELECT
+                    p.pool,
+                    pc.category,
+                    COUNT(DISTINCT p.id) AS category_total
+                FROM posting p
+                JOIN posting_category pc
+                  ON pc.posting_id = p.id AND pc.is_deleted = false
+                JOIN job_category jc
+                  ON jc.name = pc.category
+                 AND jc.is_tech = true
+                 AND jc.is_deleted = false
+                WHERE p.is_deleted = false
+                GROUP BY p.pool, pc.category
+            ),
+            category_skill_counts AS (
+                SELECT
+                    p.pool,
+                    pc.category,
+                    s.canonical AS skill_canonical,
+                    COUNT(DISTINCT p.id) AS posting_count
+                FROM posting p
+                JOIN posting_category pc
+                  ON pc.posting_id = p.id AND pc.is_deleted = false
+                JOIN job_category jc
+                  ON jc.name = pc.category
+                 AND jc.is_tech = true
+                 AND jc.is_deleted = false
+                JOIN posting_tech pt
+                  ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s
+                  ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.is_deleted = false
+                GROUP BY p.pool, pc.category, s.canonical
+            )
+            SELECT
+                ct.pool,
+                ct.category,
+                csc.skill_canonical,
+                COALESCE(csc.posting_count, 0) AS posting_count,
+                ct.category_total
+            FROM category_totals ct
+            LEFT JOIN category_skill_counts csc
+              ON csc.pool = ct.pool AND csc.category = ct.category;
+        """))
+
+        # Create mv_global_domestic_gap materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_global_domestic_gap AS
+            WITH pool_totals AS (
+                SELECT
+                    COUNT(*) FILTER (WHERE p.pool = 'global') AS global_total,
+                    COUNT(*) FILTER (WHERE p.pool = 'domestic') AS domestic_total
+                FROM posting p
+                WHERE p.is_deleted = false
+            ),
+            skill_counts AS (
+                SELECT
+                    s.id AS skill_id,
+                    s.canonical,
+                    s.category,
+                    COUNT(DISTINCT p.id) FILTER (WHERE p.pool = 'global') AS global_n,
+                    COUNT(DISTINCT p.id) FILTER (WHERE p.pool = 'domestic') AS domestic_n
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.is_deleted = false
+                  AND p.pool IN ('global', 'domestic')
+                GROUP BY s.id, s.canonical, s.category
+            ),
+            skill_shares AS (
+                SELECT
+                    sc.skill_id,
+                    sc.canonical,
+                    sc.category,
+                    sc.global_n,
+                    sc.domestic_n,
+                    COALESCE(
+                        ROUND(sc.global_n::numeric / NULLIF(pt.global_total, 0) * 100, 2),
+                        0.0
+                    ) AS global_pct,
+                    COALESCE(
+                        ROUND(sc.domestic_n::numeric / NULLIF(pt.domestic_total, 0) * 100, 2),
+                        0.0
+                    ) AS domestic_pct,
+                    pt.global_total,
+                    pt.domestic_total
+                FROM skill_counts sc
+                CROSS JOIN pool_totals pt
+            )
+            SELECT
+                skill_id,
+                canonical,
+                category,
+                global_n,
+                domestic_n,
+                global_pct,
+                domestic_pct,
+                ROUND(global_pct - domestic_pct, 2) AS diff,
+                global_total,
+                domestic_total
+            FROM skill_shares;
+        """))
+
+        # Create mv_skill_trend_yearly materialized view if not exists
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_skill_trend_yearly AS
+            WITH year_totals AS (
+                SELECT
+                    p.pool,
+                    EXTRACT(YEAR FROM p.post_date)::int AS year,
+                    COUNT(*) AS year_total
+                FROM posting p
+                WHERE p.is_deleted = false
+                  AND p.post_date IS NOT NULL
+                GROUP BY p.pool, EXTRACT(YEAR FROM p.post_date)
+            ),
+            skill_year_counts AS (
+                SELECT
+                    p.pool,
+                    EXTRACT(YEAR FROM p.post_date)::int AS year,
+                    s.canonical,
+                    COUNT(*) AS skill_count
+                FROM posting p
+                JOIN posting_tech pt
+                  ON pt.posting_id = p.id AND pt.is_deleted = false
+                JOIN skill s
+                  ON s.id = pt.skill_id AND s.is_deleted = false
+                WHERE p.is_deleted = false
+                  AND p.post_date IS NOT NULL
+                GROUP BY p.pool, EXTRACT(YEAR FROM p.post_date), s.canonical
+            ),
+            skill_totals AS (
+                SELECT
+                    syc.pool,
+                    syc.canonical,
+                    SUM(syc.skill_count) AS skill_total
+                FROM skill_year_counts syc
+                GROUP BY syc.pool, syc.canonical
+            )
+            SELECT
+                yt.pool,
+                yt.year,
+                syc.canonical,
+                COALESCE(syc.skill_count, 0) AS skill_count,
+                COALESCE(st.skill_total, 0) AS skill_total,
+                yt.year_total
+            FROM year_totals yt
+            LEFT JOIN skill_year_counts syc
+              ON syc.pool = yt.pool AND syc.year = yt.year
+            LEFT JOIN skill_totals st
+              ON st.pool = syc.pool AND st.canonical = syc.canonical;
         """))
     yield
 

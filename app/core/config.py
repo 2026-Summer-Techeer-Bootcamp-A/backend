@@ -23,6 +23,16 @@ class Settings(BaseSettings):
 
     # TODO: consumed by the future Redis client setup.
     redis_url: str = "redis://redis:6379/0"
+    search_cache_ttl_seconds: int = 3 * 60 * 60
+    search_cache_socket_timeout_seconds: float = 0.5
+
+    # 참조성 데이터(스킬·직무 카테고리·자격증) 캐시 TTL.
+    # 수집기가 돌 때만 바뀌므로 하루로 길게 잡는다.
+    reference_cache_ttl_seconds: int = 24 * 60 * 60
+    # 기술별 기업 목록은 posting과 더 밀접해 자주 바뀔 수 있어 6시간으로 짧게.
+    company_by_skill_cache_ttl_seconds: int = 6 * 60 * 60
+    # 참조 캐시도 성능 보조 기능이라 Redis 장애가 API를 오래 막지 않도록 짧은 타임아웃.
+    reference_cache_socket_timeout_seconds: float = 0.5
 
     resume_parse_max_bytes: int = 10 * 1024 * 1024
     resume_confirm_session_ttl_seconds: int = 3600
