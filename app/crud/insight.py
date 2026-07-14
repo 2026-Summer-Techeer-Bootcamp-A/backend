@@ -212,23 +212,32 @@ def get_global_domestic_gap(session: Session, *, limit: int = 20) -> tuple[list[
 def get_hiring_season(session: Session) -> tuple[list[dict], dict[str, int]]:
     """월별 채용 성수기 지수. himalayas(단일 스냅샷) 제외, 진행 중인 올해 제외."""
     current_year = date.today().year
+    post_year = func.extract("year", Posting.post_date)
+    post_month = func.extract("month", Posting.post_date)
 
     rows = session.execute(
-        select(Posting.pool, Posting.post_date).where(
+        select(
+            Posting.pool,
+            post_month.label("month"),
+            func.count(Posting.id).label("n"),
+        )
+        .where(
             Posting.source != "himalayas",
             Posting.post_date.isnot(None),
+            post_year != current_year,
             Posting.pool.in_(("global", "domestic")),
             Posting.is_deleted.is_(False),
         )
+        .group_by(Posting.pool, post_month)
     ).all()
 
     counts: dict[tuple[str, int], int] = {}
     pool_totals: dict[str, int] = {"global": 0, "domestic": 0}
-    for pool, post_date in rows:
-        if post_date.year == current_year:
-            continue
-        counts[(pool, post_date.month)] = counts.get((pool, post_date.month), 0) + 1
-        pool_totals[pool] += 1
+    for pool, month, n in rows:
+        month_number = int(month)
+        count = int(n)
+        counts[(pool, month_number)] = count
+        pool_totals[pool] += count
 
     months = []
     for m in range(1, 13):
