@@ -423,3 +423,31 @@ def test_build_description_snippet_edge_cases():
     snippet = _build_description_snippet(very_long)
     assert snippet == ("나" * 300) + "…"
     assert len(snippet) == 301
+
+
+def test_build_description_snippet_normalizes_jobkorea_boilerplate():
+    from app.crud.feed import _build_description_snippet
+
+    raw = json.dumps(
+        [
+            {
+                "title": "채용 공고 원문",
+                "text": (
+                    "㈜파이브 채용 - 카페24 마케팅 담당자 | 잡코리아 회원가입/로그인 기업 서비스 "
+                    "JOB 찾기 취업톡톡 상세요강 채용정보에 잘못된 내용이 있을 경우 문의 해주세요. "
+                    "모집요강: 모집 인원 1명 지원자격: 경력무관 학력무관"
+                ),
+            }
+        ],
+        ensure_ascii=False,
+    )
+
+    # source가 jobkorea가 아니면 정규화하지 않는다 — 원문 그대로 새는지 확인하는 회귀 테스트.
+    unnormalized = _build_description_snippet(raw, source="wanted", posting_title="카페24 마케팅 담당자")
+    assert unnormalized is not None
+    assert "잡코리아" in unnormalized
+
+    normalized = _build_description_snippet(raw, source="jobkorea", posting_title="카페24 마케팅 담당자")
+    assert normalized is not None
+    assert "잡코리아" not in normalized
+    assert "로그인" not in normalized
