@@ -92,6 +92,7 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-change-me}
+      - GF_SERVER_ROOT_URL=https://grafana.2026-techeer-a.duckdns.org
       # Discord 알림 컨택포인트가 $__env{DISCORD_WEBHOOK_URL}로 이 값을 읽는다.
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     volumes:
@@ -103,6 +104,12 @@ services:
       - tempo
     restart: unless-stopped
     logging: *default-logging
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.2026-techeer-a.duckdns.org`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
 volumes:
   traefik-certificates:
