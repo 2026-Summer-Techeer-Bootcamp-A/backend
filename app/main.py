@@ -46,6 +46,36 @@ async def lifespan(app: FastAPI):
             WHERE is_primary;
         """))
 
+        # 복합 인덱스로 대체된 단일 컬럼 인덱스 정리(perf/db-index-tuning).
+        # 실제 쿼리 패턴(app/crud/insight.py, app/crud/github_insight.py) 기준으로
+        # interest_signal은 skill_id+source 동등조건, github_repo_snapshot은
+        # snapshot_date+language 동등조건, github_star_history는 full_name IN(...)
+        # 조합이 반복되어 복합 인덱스가 단일 컬럼 인덱스보다 훨씬 유리함.
+        conn.execute(text('DROP INDEX IF EXISTS ix_interest_signal_skill_id;'))
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_interest_signal_skill_source '
+            'ON interest_signal (skill_id, source);'
+        ))
+        conn.execute(text('DROP INDEX IF EXISTS ix_github_repo_snapshot_snapshot_date;'))
+        conn.execute(text('DROP INDEX IF EXISTS ix_github_repo_snapshot_language;'))
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_github_repo_snapshot_date_lang '
+            'ON github_repo_snapshot (snapshot_date, language);'
+        ))
+        conn.execute(text('DROP INDEX IF EXISTS ix_github_star_history_full_name;'))
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_github_star_history_name_month '
+            'ON github_star_history (full_name, month);'
+        ))
+
+        # pgvector 코사인 유사도 검색(app/services/rag/tools/vector_tool.py, <=> 연산자) 전용
+        # HNSW 인덱스. 지금까지 posting_embedding에 인덱스가 없어 순차 스캔으로 코사인 거리를
+        # 전부 계산하고 있었음 — 데이터가 늘수록 느려짐.
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_posting_embedding_hnsw_cosine '
+            'ON posting_embedding USING hnsw (embedding vector_cosine_ops);'
+        ))
+
         # Create mv_skill_share materialized view if not exists
         conn.execute(text("""
             CREATE MATERIALIZED VIEW IF NOT EXISTS mv_skill_share AS
