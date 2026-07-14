@@ -13,3 +13,4 @@ class JobCategory(TimestampMixin, SoftDeleteMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True) # Mapped = SQLA 2.0의 컬럼 정의 방식
     name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     is_tech: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
