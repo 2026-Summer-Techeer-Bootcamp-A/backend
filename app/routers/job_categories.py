@@ -21,7 +21,9 @@ def get_job_categories(
     categories = list_job_categories(session, pool=pool)
     return JobCategoryListResponse(
         categories=[
-            JobCategoryItem(name=category.name, is_tech=category.is_tech)
+            JobCategoryItem(
+                name=category.name, is_tech=category.is_tech, group_name=category.group_name
+            )
             for category in categories
         ]
     )
