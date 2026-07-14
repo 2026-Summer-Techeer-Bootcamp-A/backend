@@ -23,10 +23,10 @@ def client() -> Iterator[TestClient]:
     with testing_session() as seed:
         seed.add_all(
             [
-                JobCategory(name="marketing", is_tech=False),
-                JobCategory(name="backend", is_tech=True),
-                JobCategory(name="frontend", is_tech=True),
-                JobCategory(name="deleted", is_tech=True, is_deleted=True),
+                JobCategory(name="marketing", is_tech=False, group_name=None),
+                JobCategory(name="backend", is_tech=True, group_name="dev"),
+                JobCategory(name="frontend", is_tech=True, group_name="dev"),
+                JobCategory(name="deleted", is_tech=True, is_deleted=True, group_name="dev"),
             ]
         )
         seed.commit()
@@ -64,9 +64,9 @@ def test_get_job_categories_returns_canonical_categories(client: TestClient) -> 
     assert response.status_code == 200
     assert response.json() == {
         "categories": [
-            {"name": "backend", "is_tech": True},
-            {"name": "frontend", "is_tech": True},
-            {"name": "marketing", "is_tech": False},
+            {"name": "backend", "is_tech": True, "group_name": "dev"},
+            {"name": "frontend", "is_tech": True, "group_name": "dev"},
+            {"name": "marketing", "is_tech": False, "group_name": None},
         ]
     }
 
@@ -75,14 +75,18 @@ def test_get_job_categories_scoped_to_domestic_pool(client: TestClient) -> None:
     response = client.get("/api/v1/job-categories", params={"pool": "domestic"})
 
     assert response.status_code == 200
-    assert response.json() == {"categories": [{"name": "backend", "is_tech": True}]}
+    assert response.json() == {
+        "categories": [{"name": "backend", "is_tech": True, "group_name": "dev"}]
+    }
 
 
 def test_get_job_categories_scoped_to_global_pool(client: TestClient) -> None:
     response = client.get("/api/v1/job-categories", params={"pool": "global"})
 
     assert response.status_code == 200
-    assert response.json() == {"categories": [{"name": "frontend", "is_tech": True}]}
+    assert response.json() == {
+        "categories": [{"name": "frontend", "is_tech": True, "group_name": "dev"}]
+    }
 
 
 @pytest.fixture
@@ -102,8 +106,8 @@ def client_with_non_tech_domestic_category() -> Iterator[TestClient]:
     with testing_session() as seed:
         seed.add_all(
             [
-                JobCategory(name="backend", is_tech=True),
-                JobCategory(name="사무보조", is_tech=False),
+                JobCategory(name="backend", is_tech=True, group_name="dev"),
+                JobCategory(name="사무보조", is_tech=False, group_name=None),
             ]
         )
         seed.commit()
@@ -138,4 +142,6 @@ def test_get_job_categories_scoped_to_domestic_pool_excludes_non_tech(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"categories": [{"name": "backend", "is_tech": True}]}
+    assert response.json() == {
+        "categories": [{"name": "backend", "is_tech": True, "group_name": "dev"}]
+    }
