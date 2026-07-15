@@ -8,7 +8,7 @@ import statistics
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import bindparam, distinct, func, select, text
+from sqlalchemy import bindparam, case, distinct, func, select, text
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -94,15 +94,39 @@ def get_newcomer_gate(session: Session, *, limit: int = 15) -> tuple[list[dict],
     DISTINCT 공고 기준(sample_size 분모)으로 별도 집계해 반환한다 — 다중 스킬 공고 중복
     집계나 상위 스킬 편향 없이 화면의 N과 동일 모집단의 정확한 비율이 되도록.
     """
-    rows = session.execute(
-        text("""
-            SELECT skill_canonical, postings, newcomer_postings
-            FROM mv_newcomer_gate
-            ORDER BY postings DESC
-            LIMIT :limit
-        """),
-        {"limit": limit}
-    ).all()
+    # SQLite(테스트)는 materialized view가 없어 라이브 쿼리로 대체한다.
+    if session.bind.dialect.name == "sqlite":
+        is_newcomer = case((Posting.career_min <= 0, 1), else_=0)
+        rows = session.execute(
+            select(
+                Skill.canonical.label("skill_canonical"),
+                func.count(Posting.id).label("postings"),
+                func.sum(is_newcomer).label("newcomer_postings")
+            )
+            .select_from(Posting)
+            .join(PostingTech, PostingTech.posting_id == Posting.id)
+            .join(Skill, Skill.id == PostingTech.skill_id)
+            .where(
+                Posting.pool == "domestic",
+                Posting.is_deleted.is_(False),
+                PostingTech.is_deleted.is_(False),
+                Skill.is_deleted.is_(False),
+                Posting.career_min.isnot(None),
+            )
+            .group_by(Skill.id, Skill.canonical)
+            .order_by(func.count(Posting.id).desc())
+            .limit(limit)
+        ).all()
+    else:
+        rows = session.execute(
+            text("""
+                SELECT skill_canonical, postings, newcomer_postings
+                FROM mv_newcomer_gate
+                ORDER BY postings DESC
+                LIMIT :limit
+            """),
+            {"limit": limit}
+        ).all()
 
     items = [
         {
