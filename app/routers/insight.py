@@ -50,6 +50,7 @@ from app.schemas.insight import (
     HypeVsHireResponse,
     IndustryFingerprintResponse,
     NewcomerGateResponse,
+    NewcomerOverall,
     PostingTimelineResponse,
     RegionDensityResponse,
     ResponseRateResponse,
@@ -93,9 +94,15 @@ def stats_newcomer_gate(
     limit: Annotated[int, Query(ge=1, le=50)] = 15,
 ) -> NewcomerGateResponse:
     """기술별 신입 채용 개방도(국내 전용). career_min<=0을 '신입 가능' 근사치로 사용합니다."""
-    items, sample_size = get_newcomer_gate(session=session, limit=limit)
+    items, sample_size, newcomer_total = get_newcomer_gate(session=session, limit=limit)
+    newcomer_pct = round(newcomer_total / sample_size * 100, 1) if sample_size else 0.0
     return NewcomerGateResponse(
         items=items,
+        overall=NewcomerOverall(
+            newcomer_postings=newcomer_total,
+            total_postings=sample_size,
+            newcomer_pct=newcomer_pct,
+        ),
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=sample_size < 50,
