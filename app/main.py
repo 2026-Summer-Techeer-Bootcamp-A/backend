@@ -35,7 +35,15 @@ async def lifespan(app: FastAPI):
     # 애플리케이션 시작 시, SQLAlchemy 모델들을 기반으로 DB에 아직 없는 테이블들을 모두 자동 생성합니다.
     # 추후 Alembic 등 마이그레이션 도구가 정착되면 제거할 개발 편의성 코드입니다.
     Base.metadata.create_all(bind=engine)
-    
+
+    # --workers > 1이면 워커 프로세스마다 이 lifespan이 각자 실행된다. 아래 DDL을
+    # 동시에 두 워커가 각자 트랜잭션 안에서 실행하면 서로의 테이블 락을 기다리며
+    # 데드락에 빠진다(실측: 2 워커 배포 직후 헬스체크가 영영 안 뜸). 세션 단위
+    # advisory lock으로 워커 간 실행을 직렬화한다 — 먼저 잡은 워커가 전체 DDL을
+    # 끝내고 풀어주면, 나머지는 IF NOT EXISTS라 곧바로 통과한다.
+    lock_conn = engine.connect()
+    lock_conn.execute(text("SELECT pg_advisory_lock(727123)"))
+
     with engine.begin() as conn:
         conn.execute(text('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;'))
         conn.execute(text('ALTER TABLE "resume" ADD COLUMN IF NOT EXISTS memo TEXT;'))
@@ -323,6 +331,10 @@ async def lifespan(app: FastAPI):
             LEFT JOIN skill_totals st
               ON st.pool = syc.pool AND st.canonical = syc.canonical;
         """))
+
+    lock_conn.execute(text("SELECT pg_advisory_unlock(727123)"))
+    lock_conn.close()
+
     yield
 
 app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
@@ -339,7 +351,17 @@ app.add_middleware(
 )
 
 
-Instrumentator().instrument(app).expose(app)
+# http_request_duration_seconds{handler,method}는 라이브러리 기본값이 (0.1, 0.5, 1)초
+# 버킷뿐이라, 1초를 넘는 요청은 전부 +Inf에 뭉개져 histogram_quantile이 정확한 값을
+# 계산 못하고 마지막 유한 버킷(1000ms)에 고정된 값만 반환한다. 부하 테스트 중
+# postings_search가 p95 60초까지 치솟았는데도 Grafana 대시보드는 계속 "1s"만 보여준
+# 원인이 이거였다(관측 자체가 실패, 서버가 실제로 괜찮다는 뜻이 아니었다). handler별로
+# 쪼갤 수 있는 저해상도 메트릭인 이 버킷만 넓힌다. 라벨 없는 고해상도 메트릭인
+# http_request_duration_highr_seconds는 원래도 60초까지 세밀하게 잡고 있어 그대로 둔다.
+Instrumentator().instrument(
+    app,
+    latency_lowr_buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60),
+).expose(app)
 
 # Set up static files and templates
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
