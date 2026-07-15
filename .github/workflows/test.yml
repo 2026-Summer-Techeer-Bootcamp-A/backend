@@ -8,28 +8,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements-dev.txt
-      - run: ruff check .
+      - uses: chartboost/ruff-action@v1
 
   unit:
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        id: cache-venv
+        with:
+          path: .venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt -r requirements-dev.txt
       - name: Run fast tests (SQLite)
-        run: pytest -m "not integration" -v --tb=short -ra --junitxml=junit-unit.xml
+        run: |
+          source .venv/bin/activate
+          pytest -m "not integration" -v --tb=short -ra --junitxml=junit-unit.xml
 
   integration:
-    needs: unit
+    needs: [lint, unit]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -52,16 +60,41 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        id: cache-venv
+        with:
+          path: .venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r requirements.txt -r requirements-dev.txt
       - name: Bootstrap test DB (extensions + schema)
-        run: python -m scripts.init_test_db
+        run: |
+          source .venv/bin/activate
+          python -m scripts.init_test_db
       - name: Run slow tests (real Postgres)
-        run: pytest -m integration -v --tb=short -ra --junitxml=junit-integration.xml
+        run: |
+          source .venv/bin/activate
+          pytest -m integration -v --tb=short -ra --junitxml=junit-integration.xml
 
   docker-build:
     needs: unit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t career-backend:ci .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: career-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
