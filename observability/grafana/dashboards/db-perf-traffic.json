@@ -25,7 +25,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "System Performance",
+      "title": "시스템 성능",
       "type": "link",
       "url": "/d/system-perf-monitoring"
     },
@@ -35,9 +35,9 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Web App APM",
+      "title": "APM & FastAPI",
       "type": "link",
-      "url": "/d/webapp-apm-golden"
+      "url": "/d/apm-fastapi-golden"
     },
     {
       "asDropdown": false,
@@ -45,25 +45,38 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "FastAPI Load & Perf",
+      "title": "부하 테스트 모니터링",
       "type": "link",
-      "url": "/d/fastapi-perf-loadtest"
+      "url": "/d/load-test-monitor"
     }
   ],
   "liveNow": true,
   "panels": [
     {
       "id": 1,
+      "type": "row",
+      "title": "PostgreSQL (RDB)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
       "type": "stat",
-      "title": "PostgreSQL",
+      "title": "PostgreSQL 상태",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 0,
-        "w": 3,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "fieldConfig": {
@@ -118,17 +131,17 @@
       ]
     },
     {
-      "id": 2,
+      "id": 3,
       "type": "stat",
-      "title": "Active Connections",
+      "title": "활성 커넥션",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
-        "x": 3,
-        "y": 0,
-        "w": 3,
+        "x": 4,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "fieldConfig": {
@@ -187,17 +200,17 @@
       ]
     },
     {
-      "id": 3,
+      "id": 4,
       "type": "stat",
-      "title": "Conn Usage",
+      "title": "커넥션 사용률",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
-        "x": 6,
-        "y": 0,
-        "w": 3,
+        "x": 8,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "fieldConfig": {
@@ -257,17 +270,17 @@
       ]
     },
     {
-      "id": 4,
+      "id": 5,
       "type": "stat",
-      "title": "Commits / s",
+      "title": "커밋 / 초",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
-        "x": 9,
-        "y": 0,
-        "w": 3,
+        "x": 12,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "fieldConfig": {
@@ -319,17 +332,17 @@
       ]
     },
     {
-      "id": 5,
+      "id": 6,
       "type": "stat",
-      "title": "Cache Hit",
+      "title": "캐시 히트율",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 3,
+        "x": 16,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "fieldConfig": {
@@ -389,17 +402,17 @@
       ]
     },
     {
-      "id": 6,
+      "id": 7,
       "type": "stat",
-      "title": "DB Size (appdb)",
+      "title": "DB 크기 (appdb)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
-        "x": 15,
-        "y": 0,
-        "w": 3,
+        "x": 20,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "fieldConfig": {
@@ -450,156 +463,29 @@
       ]
     },
     {
-      "id": 7,
-      "type": "stat",
-      "title": "Redis Memory",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "gridPos": {
-        "x": 18,
-        "y": 0,
-        "w": 3,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "unit": "bytes",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "purple",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "Prometheus"
-          },
-          "editorMode": "code",
-          "expr": "redis_memory_used_bytes",
-          "range": true,
-          "refId": "A",
-          "legendFormat": "mem"
-        }
-      ]
-    },
-    {
       "id": 8,
-      "type": "stat",
-      "title": "Redis Hit",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "gridPos": {
-        "x": 21,
-        "y": 0,
-        "w": 3,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "orange",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 80
-              }
-            ]
-          },
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "textMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "Prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(redis_keyspace_hits_total[5m])) / (sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])) + 1) * 100",
-          "range": true,
-          "refId": "A",
-          "legendFormat": "hit"
-        }
-      ]
-    },
-    {
-      "id": 9,
       "type": "row",
-      "title": "PostgreSQL \u2014 Traffic & Connections",
+      "title": "트래픽 & 커넥션",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 5,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 10,
+      "id": 9,
       "type": "timeseries",
-      "title": "Transaction Throughput (commit / rollback per sec)",
+      "title": "트랜잭션 처리량 (커밋/롤백 초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 6,
         "w": 12,
         "h": 8
       },
@@ -665,16 +551,16 @@
       ]
     },
     {
-      "id": 11,
+      "id": 10,
       "type": "timeseries",
-      "title": "Connections by State",
+      "title": "상태별 커넥션 수",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 6,
         "w": 12,
         "h": 8
       },
@@ -737,16 +623,16 @@
       ]
     },
     {
-      "id": 12,
+      "id": 11,
       "type": "timeseries",
-      "title": "Row Activity (tuples/sec)",
+      "title": "행 활동 (초당 튜플 수)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 14,
         "w": 12,
         "h": 8
       },
@@ -845,16 +731,16 @@
       ]
     },
     {
-      "id": 13,
+      "id": 12,
       "type": "timeseries",
-      "title": "Buffer Cache Hit Ratio %",
+      "title": "버퍼 캐시 히트율 %",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 13,
+        "y": 14,
         "w": 6,
         "h": 8
       },
@@ -925,16 +811,16 @@
       ]
     },
     {
-      "id": 14,
+      "id": 13,
       "type": "timeseries",
-      "title": "Deadlocks & Temp Files (rate)",
+      "title": "데드락 & 임시파일 (초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 18,
-        "y": 13,
+        "y": 14,
         "w": 6,
         "h": 8
       },
@@ -1000,29 +886,29 @@
       ]
     },
     {
-      "id": 15,
+      "id": 14,
       "type": "row",
-      "title": "PostgreSQL \u2014 Locks & Tables",
+      "title": "락 & 테이블",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 22,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 16,
+      "id": 15,
       "type": "timeseries",
-      "title": "Locks by Mode",
+      "title": "모드별 락 수",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 23,
         "w": 12,
         "h": 8
       },
@@ -1085,16 +971,16 @@
       ]
     },
     {
-      "id": 17,
+      "id": 16,
       "type": "table",
-      "title": "Top Tables by Live Rows",
+      "title": "라이브 행 기준 상위 테이블",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 22,
+        "y": 23,
         "w": 12,
         "h": 8
       },
@@ -1157,16 +1043,16 @@
       ]
     },
     {
-      "id": 18,
+      "id": 17,
       "type": "timeseries",
-      "title": "Index vs Sequential Scans (rate)",
+      "title": "인덱스 vs 순차 스캔 (초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 30,
+        "y": 31,
         "w": 12,
         "h": 8
       },
@@ -1232,16 +1118,16 @@
       ]
     },
     {
-      "id": 19,
+      "id": 18,
       "type": "timeseries",
-      "title": "Dead vs Live Tuples (bloat watch)",
+      "title": "죽은 행 vs 살아있는 행 (블로트 감시)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 12,
-        "y": 30,
+        "y": 31,
         "w": 12,
         "h": 8
       },
@@ -1307,29 +1193,279 @@
       ]
     },
     {
-      "id": 20,
+      "id": 19,
       "type": "row",
-      "title": "Redis \u2014 Cache",
+      "title": "Redis 캐시",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 38,
+        "y": 39,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 21,
-      "type": "timeseries",
-      "title": "Commands Processed / sec",
+      "id": 20,
+      "type": "stat",
+      "title": "Redis 메모리",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 40,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "redis_memory_used_bytes",
+          "range": true,
+          "refId": "A",
+          "legendFormat": "mem"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Redis 히트율",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 40,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(redis_keyspace_hits_total[5m])) / (sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])) + 1) * 100",
+          "range": true,
+          "refId": "A",
+          "legendFormat": "hit"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "연결된 클라이언트",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "redis_connected_clients",
+          "range": true,
+          "refId": "A",
+          "legendFormat": "clients"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "초당 처리 명령 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 40,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "rate(redis_commands_processed_total[1m])",
+          "range": true,
+          "refId": "A",
+          "legendFormat": "ops/s"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "초당 처리 명령 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
         "w": 8,
         "h": 8
       },
@@ -1384,16 +1520,16 @@
       ]
     },
     {
-      "id": 22,
+      "id": 25,
       "type": "timeseries",
-      "title": "Keyspace Hits vs Misses (rate)",
+      "title": "키스페이스 히트 vs 미스 (초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 8,
-        "y": 39,
+        "y": 44,
         "w": 8,
         "h": 8
       },
@@ -1459,16 +1595,16 @@
       ]
     },
     {
-      "id": 23,
+      "id": 26,
       "type": "timeseries",
-      "title": "Network I/O",
+      "title": "네트워크 입출력",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 16,
-        "y": 39,
+        "y": 44,
         "w": 8,
         "h": 8
       },
@@ -1534,16 +1670,16 @@
       ]
     },
     {
-      "id": 24,
+      "id": 27,
       "type": "timeseries",
-      "title": "Memory Used",
+      "title": "사용 메모리",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 0,
-        "y": 47,
+        "y": 52,
         "w": 8,
         "h": 8
       },
@@ -1598,16 +1734,16 @@
       ]
     },
     {
-      "id": 25,
+      "id": 28,
       "type": "timeseries",
-      "title": "Connected Clients",
+      "title": "연결된 클라이언트",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 8,
-        "y": 47,
+        "y": 52,
         "w": 8,
         "h": 8
       },
@@ -1662,16 +1798,16 @@
       ]
     },
     {
-      "id": 26,
+      "id": 29,
       "type": "timeseries",
-      "title": "Keys / Expired / Evicted (rate)",
+      "title": "키 개수 / 만료 / 축출 (초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
       "gridPos": {
         "x": 16,
-        "y": 47,
+        "y": 52,
         "w": 8,
         "h": 8
       },
@@ -1771,7 +1907,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Database & Cache Performance",
+  "title": "DB & 캐시 성능",
   "uid": "db-perf-traffic",
   "version": 1
 }

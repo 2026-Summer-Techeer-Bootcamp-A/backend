@@ -94,7 +94,12 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-change-me}
       - GF_SERVER_ROOT_URL=https://grafana.2026-techeer-a.duckdns.org
       # Discord 알림 컨택포인트가 $__env{DISCORD_WEBHOOK_URL}로 이 값을 읽는다.
-      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      # 빈 문자열이면 Grafana 11.5.2가 컨택포인트 검증에서 fatal error로 죽고
+      # 재시작 루프에 빠진다(빈 url은 "조용히 실패"가 아니라 provisioning
+      # 자체를 막는다). 실제 webhook이 없을 때도 뜨도록 형식만 유효한
+      # placeholder를 기본값으로 둔다 — 알림 전송은 여전히 실패하지만(의도한
+      # "조용한 실패"), Grafana 프로세스는 죽지 않는다.
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/0/placeholder}
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
@@ -110,6 +115,48 @@ services:
       - "traefik.http.routers.grafana.entrypoints=websecure"
       - "traefik.http.routers.grafana.tls.certresolver=myresolver"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # 아래 3개는 예전엔 docker-compose.dev.yml(로컬 전용)에만 있었다. deploy.yml이
+  # docker-compose.yml만 VM에 동기화하다 보니 프로덕션엔 이 exporter들이 존재한
+  # 적이 없었고, prometheus.yml의 postgres-exporter/node-exporter 스크레이프
+  # job이 조용히 데이터 없이 비어서 "시스템 성능"/"DB 내용" 대시보드가 프로덕션
+  # 에서만 비어 보이는 원인이 됐다(로컬은 dev.yml이 db/redis 컨테이너를 같이
+  # 띄워서 정상 동작했음). DSN을 db/redis 컨테이너 호스트명으로 하드코딩하지
+  # 않고 환경별 .env의 POSTGRES_EXPORTER_DSN/REDIS_EXPORTER_ADDR로 분리한 이유는
+  # 프로덕션이 컨테이너 DB가 아니라 Cloud SQL/Memorystore를 프라이빗 IP로 직접
+  # 붙기 때문이다.
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN}
+    command:
+      - "--collector.stat_user_tables"
+      - "--collector.stat_activity_autovacuum"
+      - "--collector.long_running_transactions"
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR}
+    restart: unless-stopped
+    logging: *default-logging
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    pid: host
+    restart: unless-stopped
+    logging: *default-logging
 
 volumes:
   traefik-certificates:

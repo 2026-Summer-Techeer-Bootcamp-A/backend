@@ -57,45 +57,9 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # --- Exporters (local observability) ---
-  # Postgres metrics (pg_stat_*, pg_locks, per-table stats) for the DB dashboard.
-  postgres-exporter:
-    image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
-    environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-appdb}?sslmode=disable"
-    command:
-      - "--collector.stat_user_tables"
-      - "--collector.stat_activity_autovacuum"
-      - "--collector.long_running_transactions"
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Redis metrics (memory, ops/sec, hits/misses, connected clients).
-  redis-exporter:
-    image: oliver006/redis_exporter:v1.67.0
-    environment:
-      REDIS_ADDR: "redis://redis:6379"
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Host-level metrics (CPU, memory, disk, network, load) for the System dashboard.
-  node-exporter:
-    image: prom/node-exporter:v1.8.2
-    command:
-      - "--path.procfs=/host/proc"
-      - "--path.sysfs=/host/sys"
-      - "--path.rootfs=/rootfs"
-      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    pid: host
-    restart: unless-stopped
+  # postgres-exporter/redis-exporter/node-exporter는 docker-compose.yml(base)로
+  # 옮겼다. 프로덕션 배포가 base 파일만 동기화하는데 이 3개가 dev 전용 파일에만
+  # 있어서 프로덕션 Grafana의 시스템/DB 대시보드가 계속 비어 있었기 때문이다.
 
 volumes:
   pgdata:
