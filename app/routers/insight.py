@@ -29,6 +29,7 @@ from app.crud.insight import (
     get_response_rate,
     get_role_stack_fit,
     get_skill_count_dist,
+    get_skill_rank_history,
     get_skill_share,
     get_skill_trend_yearly,
     get_skill_unlock,
@@ -50,6 +51,7 @@ from app.schemas.insight import (
     ResponseRateResponse,
     RoleStackFitResponse,
     SkillCountDistResponse,
+    SkillRankHistoryResponse,
     SkillShareResponse,
     SkillTrendYearlyResponse,
     SkillUnlockResponse,
@@ -274,6 +276,32 @@ def stats_skill_trend_yearly(
         as_of=date.today().isoformat(),
         sample_size=result["sample_size"],
     )
+
+
+@router.get("/stats/skills/rank-history", response_model=SkillRankHistoryResponse)
+def stats_skill_rank_history(
+    session: SessionDep,
+    category: Annotated[
+        Literal["language", "backend", "frontend", "db"],
+        Query(description="기술 분류 — language | backend | frontend | db"),
+    ],
+    top_n: Annotated[int, Query(ge=1, le=20, description="추적할 상위 순위 수")] = 5,
+    year_from: Annotated[int, Query(ge=2000, le=2100)] = 2022,
+    year_to: Annotated[int, Query(ge=2000, le=2100)] = 2026,
+) -> SkillRankHistoryResponse:
+    """카테고리 내 기술의 연도별 순위 이력(범프 차트용).
+
+    절대 점유율(%)은 소스별 수집 규모 차이로 오염돼 노출하지 않고, 결정적 순위만 반환한다.
+    동점은 점유율↓ → 공고 수↓ → 이름↑로 처리하며, top_n 밖 연도는 rank를 null로 내린다.
+    """
+    result = get_skill_rank_history(
+        session=session,
+        category=category,
+        top_n=top_n,
+        year_from=year_from,
+        year_to=year_to,
+    )
+    return SkillRankHistoryResponse(**result)
 
 
 @router.get("/stats/hot-companies", response_model=HotCompaniesResponse)
