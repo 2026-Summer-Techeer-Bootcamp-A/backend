@@ -8,7 +8,7 @@ import statistics
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import bindparam, case, distinct, func, select, text
+from sqlalchemy import bindparam, distinct, func, select, text
 from sqlalchemy.orm import Session
 
 from app.models import (
