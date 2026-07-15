@@ -18,13 +18,13 @@ router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(body: ChatRequest, session: SessionDep) -> ChatResponse:
-    return run_chat(session, body.question, body.pool)
+    return run_chat(session, body.question, body.pool, body.verbose)
 
 
 @router.post("/chat/stream")
 def chat_stream(body: ChatRequest, session: SessionDep) -> StreamingResponse:
     def gen() -> Iterator[str]:
-        for event in run_chat_events(session, body.question, body.pool):
+        for event in run_chat_events(session, body.question, body.pool, verbose=body.verbose):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")

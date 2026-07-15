@@ -40,7 +40,7 @@ def _confidence_level(n: int) -> int:
     return 5
 
 
-def _dispatch(session: Session, p: Plan) -> tuple[list[dict], bool]:
+def _dispatch(session: Session, p: Plan, verbose: bool = False) -> tuple[list[dict], bool]:
     """intent에 따라 도구를 실행하고 (tool_output 리스트, fell_back)을 반환.
 
     fell_back=True는 "질문이 겨냥한 대상과 실제로 답한 대상이 다르다"는 뜻이다 — 즉
@@ -56,34 +56,51 @@ def _dispatch(session: Session, p: Plan) -> tuple[list[dict], bool]:
     out: list[dict] = []
 
     if p.intent == "cooccurrence" and skill:
-        r = graph_tool.co_occurring_skills(session, skill, pool)
+        r = graph_tool.co_occurring_skills(session, skill, pool, verbose=verbose)
         if r:
             out.append(r)
     elif p.intent == "semantic_search":
-        r = vector_tool.semantic_search(session, p.subqueries[0] if p.subqueries else "", pool)
+        r = vector_tool.semantic_search(
+            session, p.subqueries[0] if p.subqueries else "", pool, verbose=verbose
+        )
         if r:
             out.append(r)
     elif p.intent == "skill_demand" and skill:
-        r = sql_tool.skill_demand(session, skill, pool, category=category, entry_level=entry_level)
+        r = sql_tool.skill_demand(
+            session, skill, pool, category=category, entry_level=entry_level, verbose=verbose
+        )
         if r:
             out.append(r)
     elif p.intent == "compare":
         skills_list = p.entities.get("skills") or []
         if skills_list:
-            r = sql_tool.multi_skill_compare(session, list(skills_list), pool, category=category, entry_level=entry_level)
+            r = sql_tool.multi_skill_compare(
+                session,
+                list(skills_list),
+                pool,
+                category=category,
+                entry_level=entry_level,
+                verbose=verbose,
+            )
             if r:
                 out.append(r)
     elif p.intent == "concept_ranking":
-        out.append(sql_tool.top_concepts(session, pool))
+        out.append(sql_tool.top_concepts(session, pool, verbose=verbose))
     elif p.intent == "cert_ranking":
-        out.append(sql_tool.top_certs(session, pool, category=category, entry_level=entry_level))
+        out.append(
+            sql_tool.top_certs(
+                session, pool, category=category, entry_level=entry_level, verbose=verbose
+            )
+        )
     elif p.intent == "region_distribution":
-        out.append(sql_tool.top_locations(session, pool))
+        out.append(sql_tool.top_locations(session, pool, verbose=verbose))
 
     used_fallback_branch = not out
     if used_fallback_branch:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
         out.append(
-            sql_tool.top_skills(session, pool, category=category, entry_level=entry_level)
+            sql_tool.top_skills(
+                session, pool, category=category, entry_level=entry_level, verbose=verbose
+            )
         )
     fell_back = used_fallback_branch and not category and not entry_level
 
@@ -94,7 +111,7 @@ def _dispatch(session: Session, p: Plan) -> tuple[list[dict], bool]:
         primary_items = out[0]["tool_result"].get("items") or []
         if primary_items:
             insight_skill = primary_items[0]["name"]
-            insight = graph_tool.co_occurring_skills(session, insight_skill, pool)
+            insight = graph_tool.co_occurring_skills(session, insight_skill, pool, verbose=verbose)
             if insight:
                 out.append(insight)
 
@@ -106,6 +123,7 @@ def run_chat_events(
     question: str,
     pool: str | None = None,
     *,
+    verbose: bool = False,
     collect: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """SSE 계약과 정확히 같은 모양의 이벤트를 순서대로 yield한다.
@@ -150,7 +168,7 @@ def run_chat_events(
             },
         }
 
-        tool_outputs, fell_back = _dispatch(session, p)
+        tool_outputs, fell_back = _dispatch(session, p, verbose=verbose)
         collect["tool_outputs"] = tool_outputs
         if fell_back:
             plan_step.detail = (plan_step.detail or "") + " · (대상 미해소, 일반 랭킹으로 대체)"
@@ -222,9 +240,11 @@ def run_chat_events(
         yield {"type": "error", "message": str(exc)}
 
 
-def run_chat(session: Session, question: str, pool: str | None = None) -> ChatResponse:
+def run_chat(
+    session: Session, question: str, pool: str | None = None, verbose: bool = False
+) -> ChatResponse:
     collect: dict[str, Any] = {}
-    for _event in run_chat_events(session, question, pool, collect=collect):
+    for _event in run_chat_events(session, question, pool, verbose=verbose, collect=collect):
         pass  # 이벤트는 스트리밍 전용 — 비스트리밍 조립은 collect로 한다
 
     if "exception" in collect:
