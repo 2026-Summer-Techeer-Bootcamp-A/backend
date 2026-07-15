@@ -149,6 +149,31 @@ class CooccurrenceResponse(BaseModel):
     as_of: str
 
 
+class StackComboItem(BaseModel):
+    """base_skill과 함께 요구되는 기술 + 조건부 비율(%) + 공동 공고 수."""
+
+    skill: str
+    co_rate: float  # 0~100 (%)
+    co_count: int
+
+
+class StackInsightRequest(BaseModel):
+    base_skill: str
+    pool: Literal["domestic", "global"] = "domestic"
+    owned_skills: list[str] = []
+
+
+class StackInsightResponse(BaseModel):
+    """스택 조합 인사이트 — 조건부 비율 막대용 combos + LLM 한 줄 문장."""
+
+    base_skill: str
+    pool: str
+    combos: list[StackComboItem]
+    insight: str
+    ai_generated: bool  # LLM이 생성했는지(False면 결정적 폴백 문장)
+    as_of: str
+
+
 class PostingTimelineDay(BaseModel):
     date: str
     total: int

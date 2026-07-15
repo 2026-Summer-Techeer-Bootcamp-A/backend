@@ -3,6 +3,8 @@
 프론트 `/widgets` 갤러리에만 있던 pearl 지표(a,h,o,p,r,x)를 정식 엔드포인트로 노출한다.
 """
 
+import hashlib
+import json
 import logging
 from datetime import date
 from typing import Annotated, Literal
@@ -13,6 +15,8 @@ from redis.exceptions import RedisError
 
 from app.core.deps import SessionDep
 from app.core.redis import redis_client
+from app.services.rag.llm import get_llm
+from app.services.stack_insight import build_stack_insight
 from app.crud.insight import (
     get_concept_tech,
     get_cooccurrence,
@@ -53,6 +57,8 @@ from app.schemas.insight import (
     SkillCountDistResponse,
     SkillRankHistoryResponse,
     SkillShareResponse,
+    StackInsightRequest,
+    StackInsightResponse,
     SkillTrendYearlyResponse,
     SkillUnlockResponse,
 )
@@ -415,3 +421,49 @@ def stats_global_domestic_lag(
         as_of=date.today().isoformat(),
         note="근사·교차상관 기반 — 스크래핑 배치 노이즈와 표본 편향으로 정밀한 시차가 아닌 방향성 참고용",
     )
+
+
+STACK_INSIGHT_CACHE_TTL_SECONDS = 24 * 60 * 60
+
+
+def _stack_insight_cache_key(base_skill: str, pool: str, owned_skills: list[str]) -> str:
+    raw = json.dumps([base_skill, pool, sorted(set(owned_skills))], ensure_ascii=False)
+    return "insights:stack:v1:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@router.post("/insights/stack", response_model=StackInsightResponse)
+def insights_stack(session: SessionDep, body: StackInsightRequest) -> StackInsightResponse:
+    """스택 조합 인사이트 — base_skill과 함께 요구되는 상위 기술(조건부 비율) + LLM 한 줄 문장.
+
+    숫자는 전부 mv_cooccurrence 집계에서 나오고 LLM은 문장만 조립한다(환각으로 수치가 틀리지
+    않음). 같은 조합은 Redis에 캐싱해 데모 중 LLM 지연을 피한다. base_skill이 taxonomy에 없으면 422.
+    """
+    owned = sorted(set(body.owned_skills))
+    cache_key = _stack_insight_cache_key(body.base_skill, body.pool, owned)
+
+    try:
+        cached = redis_client.get(cache_key)
+    except RedisError:
+        logger.warning("스택 인사이트 캐시 조회 실패", exc_info=True)
+    else:
+        if cached is not None:
+            try:
+                return StackInsightResponse.model_validate_json(cached)
+            except (ValidationError, ValueError, TypeError):
+                logger.warning("스택 인사이트 캐시 데이터 검증 실패", exc_info=True)
+
+    result = build_stack_insight(
+        session=session,
+        base_skill=body.base_skill,
+        pool=body.pool,
+        owned_skills=owned,
+        llm=get_llm(),
+    )
+    response = StackInsightResponse(**result)
+
+    try:
+        redis_client.setex(cache_key, STACK_INSIGHT_CACHE_TTL_SECONDS, response.model_dump_json())
+    except RedisError:
+        logger.warning("스택 인사이트 캐시 저장 실패", exc_info=True)
+
+    return response
