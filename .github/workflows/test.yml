@@ -3,6 +3,10 @@ name: test
 on:
   workflow_call:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -22,7 +26,7 @@ jobs:
         id: cache-venv
         with:
           path: .venv
-          key: ${{ runner.os }}-venv-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          key: ${{ runner.os }}-venv-${{ hashFiles('requirements-test.txt') }}
           restore-keys: |
             ${{ runner.os }}-venv-
       - name: Install dependencies
@@ -30,7 +34,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements-test.txt
       - name: Run fast tests (SQLite)
         run: |
           source .venv/bin/activate
@@ -65,7 +69,7 @@ jobs:
         id: cache-venv
         with:
           path: .venv
-          key: ${{ runner.os }}-venv-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          key: ${{ runner.os }}-venv-${{ hashFiles('requirements-test.txt') }}
           restore-keys: |
             ${{ runner.os }}-venv-
       - name: Install dependencies
@@ -73,7 +77,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements-test.txt
       - name: Bootstrap test DB (extensions + schema)
         run: |
           source .venv/bin/activate
