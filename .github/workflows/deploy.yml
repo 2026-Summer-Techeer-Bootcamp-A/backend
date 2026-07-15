@@ -34,14 +34,23 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: projects/774556382259/locations/global/workloadIdentityPools/github-pool/providers/github-provider
           service_account: gh-deployer@project-bc9a4402-231d-49bc-a3c.iam.gserviceaccount.com
+          token_format: access_token
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # buildx's docker-container builder runs BuildKit in its own container,
+      # which has no gcloud CLI to exec the docker-credential-gcloud helper
+      # written by `gcloud auth configure-docker`. Log in with a plain access
+      # token instead so BuildKit can read the auth entry directly.
+      - name: Log in to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -77,17 +86,8 @@ jobs:
         run: |
           DETAILS="$(tail -n 20 deploy_out.txt 2>/dev/null)" python3 scripts/notify.py
 
-# TODO(IAM): the gh-deployer service account needs the following roles:
-#   - roles/artifactregistry.writer
-#   - roles/compute.instanceAdmin.v1
-#   - roles/iam.serviceAccountUser
-#
-# TODO: grant gh-deployer roles/compute.osAdminLogin so `gcloud compute ssh` can run
-# sudo docker non-interactively (the CI logs in as a fresh OS Login POSIX user without
-# the docker group). The deploy target is a fixed path /opt/app (NOT ~/app -- the CI
-# user's home differs from the human's). /opt/app must contain docker-compose.yml, .env,
-# and observability/. Also run `sudo gcloud auth configure-docker <region>-docker.pkg.dev`
-# on the VM so root's docker can pull from Artifact Registry.
-#
-# TODO: create the Artifact Registry repo before the first deploy:
-#   gcloud artifacts repositories create app --repository-format=docker --location=asia-northeast3
+# gh-deployer IAM roles, compute.osAdminLogin, and the Artifact Registry repo
+# are already provisioned. The deploy target is a fixed path /opt/app (NOT
+# ~/app -- the CI user's home differs from the human's), containing
+# docker-compose.yml, .env, and observability/. The VM's root docker is
+# authenticated to Artifact Registry via `sudo gcloud auth configure-docker`.
