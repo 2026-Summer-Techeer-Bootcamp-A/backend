@@ -332,6 +332,68 @@ async def lifespan(app: FastAPI):
               ON st.pool = syc.pool AND st.canonical = syc.canonical;
         """))
 
+        # Enable pg_trgm extension for trigram search
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
+
+        # GIN trigram indexes for title and company (for LIKE/ILIKE optimization)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posting_title_trgm ON posting USING gin (title gin_trgm_ops);"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_posting_company_trgm ON posting USING gin (company gin_trgm_ops);"))
+
+        # Composite index for posting list filters (pool, close_date, post_date DESC)
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_list_filter 
+            ON posting (pool, close_date, post_date DESC) 
+            WHERE is_deleted = false;
+        """))
+
+        # Coordinates B-Tree composite index
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_coordinates 
+            ON posting (pool, lat, lng) 
+            WHERE is_deleted = false AND lat IS NOT NULL AND lng IS NOT NULL;
+        """))
+
+        # Region district index
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_region_district 
+            ON posting (region_district) 
+            WHERE is_deleted = false;
+        """))
+
+        # Materialized view for stats_newcomer_gate
+        conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_newcomer_gate AS
+            SELECT
+                s.canonical AS skill_canonical,
+                COUNT(DISTINCT p.id) AS postings,
+                SUM(CASE WHEN p.career_min <= 0 THEN 1 ELSE 0 END) AS newcomer_postings
+            FROM posting p
+            JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = false
+            JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = false
+            WHERE p.pool = 'domestic'
+              AND p.is_deleted = false
+              AND p.career_min IS NOT NULL
+            GROUP BY s.canonical;
+        """))
+
+        # Index on mv_newcomer_gate postings
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mv_newcomer_gate_postings ON mv_newcomer_gate (postings DESC);"))
+
+        # Index on mv_skill_share for pool and position filter
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mv_skill_share_pool_pos ON mv_skill_share (pool, position);"))
+
+        # Aggregation indexes for region density and hot companies
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_region_density_agg 
+            ON posting (pool, region_district) 
+            WHERE is_deleted = false;
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_hot_companies_agg 
+            ON posting (pool, post_date, company) 
+            WHERE is_deleted = false;
+        """))
+
     lock_conn.execute(text("SELECT pg_advisory_unlock(727123)"))
     lock_conn.close()
 
