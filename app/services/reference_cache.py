@@ -14,22 +14,14 @@ import json
 import logging
 from typing import TypeVar
 
-import redis
 from pydantic import BaseModel, ValidationError
 from redis.exceptions import RedisError
 
-from app.core.config import settings
+from app.core.redis import redis_client
 
 logger = logging.getLogger(__name__)
 
 REFERENCE_CACHE_KEY_PREFIX = "refcache:v1"
-
-redis_client = redis.from_url(
-    settings.redis_url,
-    decode_responses=True,
-    socket_connect_timeout=settings.reference_cache_socket_timeout_seconds,
-    socket_timeout=settings.reference_cache_socket_timeout_seconds,
-)
 
 T = TypeVar("T", bound=BaseModel)
 
