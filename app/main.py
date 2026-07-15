@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest, multiprocess
 from pydantic import BaseModel, ConfigDict
 import os
 from fastapi.staticfiles import StaticFiles
@@ -423,7 +424,19 @@ app.add_middleware(
 Instrumentator().instrument(
     app,
     latency_lowr_buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60),
-).expose(app)
+)
+
+# --workers > 1이면 uvicorn이 워커마다 별도 프로세스를 띄우고, 각 프로세스는 자기만의
+# 인메모리 레지스트리에 카운터를 쌓는다. Instrumentator().expose(app)가 만드는 기본
+# /metrics는 그 중 요청을 우연히 받은 워커 하나의 값만 보여줘서, 스크레이프할 때마다
+# 무작위로 다른(그리고 실제보다 훨씬 작은) 숫자가 나온다. PROMETHEUS_MULTIPROC_DIR에
+# 워커들이 공유 파일로 값을 쓰게 하고, /metrics는 MultiProcessCollector로 그 파일들을
+# 합산해서 응답해야 전체 워커 합계가 나온다.
+@app.get("/metrics")
+def metrics():
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry)
+    return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 # Set up static files and templates
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

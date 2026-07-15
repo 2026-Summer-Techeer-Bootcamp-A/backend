@@ -17,6 +17,7 @@ services:
     restart: unless-stopped
     environment:
       - HF_HOME=/models
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
     volumes:
       - model-cache:/models
     logging: *default-logging
