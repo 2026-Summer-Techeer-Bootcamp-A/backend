@@ -11,6 +11,7 @@ services:
   app:
     build: .
     image: ${APP_IMAGE:-career-backend:local}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "9"]
     env_file:
       - .env
     restart: unless-stopped
