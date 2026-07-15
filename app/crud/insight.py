@@ -756,6 +756,123 @@ def get_skill_trend_yearly(session: Session, *, pool: str, top_k: int = 15, move
     }
 
 
+# rank-history API의 category 파라미터 → 실제 skill.category 값(taxonomy_v2.json 상위 키).
+# db는 데이터에서 'data_db'로 적재되므로 매핑한다. 데이터 명칭이 흔들려도 견디도록
+# 후보를 리스트로 두고 IN으로 조회한다(존재하지 않는 후보는 무해).
+RANK_HISTORY_CATEGORY_DB_VALUES: dict[str, list[str]] = {
+    "language": ["language"],
+    "backend": ["backend"],
+    "frontend": ["frontend"],
+    "db": ["data_db", "database", "db"],
+}
+
+
+def get_skill_rank_history(
+    session: Session,
+    *,
+    category: str,
+    top_n: int = 5,
+    year_from: int = 2022,
+    year_to: int = 2026,
+) -> dict:
+    """카테고리 내 기술의 연도별 순위 이력.
+
+    절대 점유율(%)은 소스별 수집 규모 차이로 오염돼 있어 노출하지 않고 순위만 쓴다.
+    순위는 mv_skill_trend_yearly의 연도별 집계(모든 pool 합산)를 기준으로 산정하며,
+    동점은 결정적으로 처리한다: 점유율 내림차순 → 공고 수 내림차순 → 이름 오름차순.
+    top_n 밖으로 밀려난 연도의 rank는 None으로 내려 선이 끊기는 표현을 지원한다.
+    """
+    db_categories = RANK_HISTORY_CATEGORY_DB_VALUES.get(category, [category])
+
+    count_stmt = (
+        text(
+            """
+            SELECT mv.year AS year, mv.canonical AS canonical,
+                   SUM(mv.skill_count) AS cnt
+            FROM mv_skill_trend_yearly mv
+            JOIN skill s
+              ON s.canonical = mv.canonical AND s.is_deleted = false
+            WHERE mv.canonical IS NOT NULL
+              AND mv.year BETWEEN :year_from AND :year_to
+              AND s.category IN :categories
+            GROUP BY mv.year, mv.canonical
+            """
+        )
+        .bindparams(bindparam("categories", expanding=True))
+    )
+    count_rows = session.execute(
+        count_stmt,
+        {"year_from": year_from, "year_to": year_to, "categories": db_categories},
+    ).mappings().all()
+
+    # 연도별 총 공고 수(점유율 분모) — pool마다 year_total이 중복되므로 pool별로 한 번씩만 더한다.
+    denom_rows = session.execute(
+        text(
+            """
+            SELECT year, SUM(year_total) AS denom
+            FROM (
+                SELECT DISTINCT pool, year, year_total
+                FROM mv_skill_trend_yearly
+                WHERE year BETWEEN :year_from AND :year_to
+            ) t
+            GROUP BY year
+            """
+        ),
+        {"year_from": year_from, "year_to": year_to},
+    ).mappings().all()
+    year_denominator = {int(r["year"]): int(r["denom"]) for r in denom_rows}
+
+    # (year, canonical) → count 로 모으고, 순위 산정에 쓸 연도 목록을 만든다.
+    counts_by_year: dict[int, dict[str, int]] = {}
+    for row in count_rows:
+        year = int(row["year"])
+        counts_by_year.setdefault(year, {})[row["canonical"]] = int(row["cnt"])
+
+    years = sorted(counts_by_year.keys())
+
+    # 각 연도별로 결정적 순위를 매긴다. 정렬 키: 점유율↓ → 공고 수↓ → 이름↑.
+    # (연도 내 분모가 동일해 점유율↓과 공고 수↓는 사실상 같은 순서지만 스펙 그대로 구현한다.)
+    rank_by_year: dict[int, dict[str, int]] = {}
+    for year in years:
+        denom = year_denominator.get(year, 0)
+        ranked = sorted(
+            counts_by_year[year].items(),
+            key=lambda kv: (
+                -(kv[1] / denom if denom else 0.0),  # 점유율 내림차순
+                -kv[1],                               # 공고 수 내림차순
+                kv[0],                                # 이름 오름차순
+            ),
+        )
+        rank_by_year[year] = {name: idx + 1 for idx, (name, _cnt) in enumerate(ranked)}
+
+    # 시리즈에 넣을 기술 = 한 해라도 top_n 안에 든 기술.
+    tracked = {
+        name
+        for ranks in rank_by_year.values()
+        for name, rank in ranks.items()
+        if rank <= top_n
+    }
+
+    def ranks_for(name: str) -> list[int | None]:
+        out: list[int | None] = []
+        for year in years:
+            rank = rank_by_year.get(year, {}).get(name)
+            out.append(rank if rank is not None and rank <= top_n else None)
+        return out
+
+    # 최신 연도 순위가 높은(작은) 순으로 정렬, 동률/결측은 이름순으로 결정적 배치.
+    def sort_key(name: str) -> tuple[int, str]:
+        latest_rank = rank_by_year.get(years[-1], {}).get(name) if years else None
+        return (latest_rank if latest_rank is not None else top_n + 1, name)
+
+    skills = [
+        {"name": name, "ranks": ranks_for(name)}
+        for name in sorted(tracked, key=sort_key)
+    ]
+
+    return {"years": years, "skills": skills}
+
+
 def get_hot_companies(session: Session, *, pool: str, days: int = 30, limit: int = 20) -> tuple[list[dict], str]:
     """최근 days일간(as_of=풀 내 최신 post_date 기준) 신규 공고가 많은 활발 기업."""
     as_of_date = session.scalar(
