@@ -69,6 +69,7 @@ logger = logging.getLogger(__name__)
 
 HIRING_SEASON_CACHE_KEY = "stats:hiring-season:v1"
 HIRING_SEASON_CACHE_TTL_SECONDS = 6 * 60 * 60
+NEWCOMER_GATE_CACHE_TTL_SECONDS = 6 * 60 * 60
 
 
 @router.get("/trend/hype-vs-hire", response_model=HypeVsHireResponse)
@@ -93,14 +94,37 @@ def stats_newcomer_gate(
     limit: Annotated[int, Query(ge=1, le=50)] = 15,
 ) -> NewcomerGateResponse:
     """기술별 신입 채용 개방도(국내 전용). career_min<=0을 '신입 가능' 근사치로 사용합니다."""
+    cache_key = f"stats:newcomer-gate:v1:{limit}"
+    try:
+        cached = redis_client.get(cache_key)
+    except RedisError:
+        logger.warning("신입 채용 개방도 캐시 조회 실패", exc_info=True)
+    else:
+        if cached is not None:
+            try:
+                return NewcomerGateResponse.model_validate_json(cached)
+            except (ValidationError, ValueError, TypeError):
+                logger.warning("신입 채용 개방도 캐시 데이터 검증 실패", exc_info=True)
+
     items, sample_size = get_newcomer_gate(session=session, limit=limit)
-    return NewcomerGateResponse(
+    response = NewcomerGateResponse(
         items=items,
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=sample_size < 50,
         note="jumpit의 newcomer 원본 플래그는 DB에 미적재 — career_min<=0을 근사치로 사용",
     )
+
+    try:
+        redis_client.setex(
+            cache_key,
+            NEWCOMER_GATE_CACHE_TTL_SECONDS,
+            response.model_dump_json(),
+        )
+    except RedisError:
+        logger.warning("신입 채용 개방도 캐시 저장 실패", exc_info=True)
+
+    return response
 
 
 @router.get("/stats/global-domestic-gap", response_model=GlobalDomesticGapResponse)

@@ -15,7 +15,7 @@ from app.core.db import Base, get_session
 from app.main import app
 from app.models import InterestSignal, JobCategory, Posting, PostingCategory, PostingTech, Skill
 from app.routers import insight as insight_router
-from app.schemas.insight import HiringSeasonResponse
+from app.schemas.insight import HiringSeasonResponse, NewcomerGateResponse
 
 
 class FakeRedis:
@@ -431,3 +431,62 @@ def test_role_stack_fit_filters_materialized_view_by_pool(client: TestClient) ->
     assert body["categories"] == [{"name": "backend", "n": 1}]
     assert body["matrix"] == [[100.0]]
     assert body["sample_size"] == 1
+
+
+def test_newcomer_gate_cache_miss_sets_six_hour_ttl(client: TestClient, fake_redis: FakeRedis) -> None:
+    resp = client.get("/api/v1/stats/newcomer-gate", params={"limit": 15})
+
+    assert resp.status_code == 200
+    assert len(fake_redis.setex_calls) == 1
+    key, ttl, cached_json = fake_redis.setex_calls[0]
+    assert key == "stats:newcomer-gate:v1:15"
+    assert ttl == 21_600
+    assert NewcomerGateResponse.model_validate_json(cached_json).model_dump(mode="json") == resp.json()
+
+
+def test_newcomer_gate_cache_hit_skips_database(
+    client: TestClient,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cached_payload = {
+        "items": [
+            {
+                "canonical": "Python",
+                "postings": 10,
+                "newcomer_postings": 5,
+                "open_rate": 50.0,
+            }
+        ],
+        "pool": "domestic",
+        "as_of": "2026-07-14",
+        "sample_size": 10,
+        "sample_warning": True,
+        "note": "cached response",
+    }
+    fake_redis.store["stats:newcomer-gate:v1:15"] = json.dumps(cached_payload)
+
+    def fail_if_called(*, session: Session, limit: int) -> tuple[list, int]:
+        raise AssertionError("database must not be queried on cache hit")
+
+    monkeypatch.setattr(insight_router, "get_newcomer_gate", fail_if_called)
+
+    resp = client.get("/api/v1/stats/newcomer-gate", params={"limit": 15})
+
+    assert resp.status_code == 200
+    assert resp.json() == cached_payload
+
+
+def test_newcomer_gate_redis_failure_falls_back_to_database(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(insight_router, "redis_client", BrokenRedis(), raising=False)
+
+    resp = client.get("/api/v1/stats/newcomer-gate", params={"limit": 15})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    python_item = next(item for item in body["items"] if item["canonical"] == "Python")
+    assert python_item["postings"] == 1
+    assert python_item["open_rate"] == 100.0
