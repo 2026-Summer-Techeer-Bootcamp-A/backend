@@ -211,6 +211,20 @@ class SkillTrendYearlyResponse(BaseModel):
     sample_size: int
 
 
+class SkillRankHistorySeries(BaseModel):
+    """기술별 연도 순위 이력. ranks는 years와 동일 길이, top_n 밖 연도는 null(선 끊김용)."""
+
+    name: str
+    ranks: list[int | None]
+
+
+class SkillRankHistoryResponse(BaseModel):
+    """카테고리 내 기술의 연도별 순위 변화(범프 차트용). 점유율%는 노출하지 않는다."""
+
+    years: list[int]
+    skills: list[SkillRankHistorySeries]
+
+
 class HotCompanyItem(BaseModel):
     company: str
     posting_count: int
