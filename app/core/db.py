@@ -12,16 +12,20 @@ class Base(DeclarativeBase):
 
 # Engine is created lazily-connected: create_engine does not open a connection
 # until first use, so importing this module never requires a live database.
-# pool_size/max_overflow are explicit (not SQLAlchemy's 5+10 default): with
-# --workers 2 that default caps the whole process at 15 connections total,
-# which a handful of multi-second raw-aggregation stats queries can exhaust
-# outright under load, starving every other endpoint waiting on the pool.
-# 10+10 per worker x 2 workers = 40 max, versus Cloud SQL's max_connections=100.
+#
+# Pool sizing rationale (--workers 9, PostgreSQL max_connections=400):
+#   - Reserved for monitoring/internal services: ~10 connections
+#   - Available for app: ~390 connections
+#   - Per-worker allocation: pool_size=30, max_overflow=10 → 40 max/worker
+#   - Total max: 40 × 9 workers = 360 connections (within pg limit)
+#   - pool_timeout=10: fail fast under saturation instead of blocking 30s,
+#     which lets the caller surface a 503 quickly rather than queuing.
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
-    pool_size=10,
+    pool_size=30,
     max_overflow=10,
+    pool_timeout=10,
     future=True,
 )
 
