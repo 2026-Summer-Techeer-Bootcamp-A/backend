@@ -227,6 +227,23 @@ def client() -> Iterator[TestClient]:
             )
         )
 
+        # mv_newcomer_gate는 시드된 실제 공고에서 그대로 파생한다(Postgres MV 대역).
+        seed.execute(
+            text(
+                """
+                CREATE TABLE mv_newcomer_gate AS
+                SELECT s.canonical AS skill_canonical,
+                       COUNT(DISTINCT p.id) AS postings,
+                       SUM(CASE WHEN p.career_min <= 0 THEN 1 ELSE 0 END) AS newcomer_postings
+                FROM posting p
+                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = 0
+                JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = 0
+                WHERE p.pool = 'domestic' AND p.is_deleted = 0 AND p.career_min IS NOT NULL
+                GROUP BY s.canonical
+                """
+            )
+        )
+
         seed.execute(
             text(
                 """
@@ -289,6 +306,10 @@ def test_newcomer_gate_computes_open_rate(client: TestClient) -> None:
     # domestic Python 요구 공고: toss(career_min=0) 1건 뿐 -> open_rate 100
     assert python_item["postings"] == 1
     assert python_item["open_rate"] == 100.0
+
+    # 공고 단위(DISTINCT) 신입 비율: domestic career_min 있는 공고 toss(0)·kakao(3)·naver(0)
+    # = 3건 중 신입 가능(career_min<=0) 2건 -> 66.7% (상위 스킬 가중평균이 아님).
+    assert body["overall"] == {"newcomer_postings": 2, "total_postings": 3, "newcomer_pct": 66.7}
 
 
 def test_global_domestic_gap_never_mixes_pools(client: TestClient) -> None:

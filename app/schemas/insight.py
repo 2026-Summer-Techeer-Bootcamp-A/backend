@@ -28,11 +28,23 @@ class NewcomerGateItem(BaseModel):
     open_rate: float = 0  # percent
 
 
+class NewcomerOverall(BaseModel):
+    """공고 단위(DISTINCT) 신입 가능 비율 — 상위 스킬 가중평균이 아닌 전체 공고 기준.
+
+    total_postings는 sample_size와 동일(career_min이 있는 국내 공고 수).
+    """
+
+    newcomer_postings: int
+    total_postings: int
+    newcomer_pct: float  # percent
+
+
 class NewcomerGateResponse(BaseModel):
     """신입 진입장벽 — career_min<=0을 신입 가능 근사치로 사용(국내 전용)."""
 
     pool: Literal["domestic"] = "domestic"
     items: list[NewcomerGateItem]
+    overall: NewcomerOverall
     as_of: str
     sample_size: int
     sample_warning: bool | None = None
