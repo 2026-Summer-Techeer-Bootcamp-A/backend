@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, SessionDep
@@ -236,7 +237,11 @@ async def parse_resume(file: UploadFile, session: SessionDep) -> ResumeParseResp
         )
 
     try:
-        return parse_resume_pdf(contents, session)
+        # parse_resume_pdf does sync DB queries (SessionDep) and a sync LLM call;
+        # this route is async only for `await file.read()` above, so calling it
+        # directly here would block the event loop for the whole parse+LLM
+        # round trip. Offload it to the threadpool like every other sync route.
+        return await run_in_threadpool(parse_resume_pdf, contents, session)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

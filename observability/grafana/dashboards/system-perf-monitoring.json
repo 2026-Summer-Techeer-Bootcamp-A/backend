@@ -25,7 +25,7 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Database & Cache",
+      "title": "DB & 캐시",
       "type": "link",
       "url": "/d/db-perf-traffic"
     },
@@ -35,9 +35,9 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "Web App APM",
+      "title": "APM & FastAPI",
       "type": "link",
-      "url": "/d/webapp-apm-golden"
+      "url": "/d/apm-fastapi-golden"
     },
     {
       "asDropdown": false,
@@ -45,9 +45,9 @@
       "includeVars": true,
       "keepTime": true,
       "targetBlank": false,
-      "title": "FastAPI Load & Perf",
+      "title": "부하 테스트 모니터링",
       "type": "link",
-      "url": "/d/fastapi-perf-loadtest"
+      "url": "/d/load-test-monitor"
     }
   ],
   "liveNow": true,
@@ -55,7 +55,7 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Uptime",
+      "title": "가동 시간",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -109,14 +109,14 @@
           "expr": "node_time_seconds - node_boot_time_seconds",
           "range": true,
           "refId": "A",
-          "legendFormat": "uptime"
+          "legendFormat": "가동 시간"
         }
       ]
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "CPU Cores",
+      "title": "CPU 코어 수",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -170,14 +170,14 @@
           "expr": "count(count by (cpu)(node_cpu_seconds_total))",
           "range": true,
           "refId": "A",
-          "legendFormat": "cores"
+          "legendFormat": "코어"
         }
       ]
     },
     {
       "id": 3,
       "type": "stat",
-      "title": "CPU Busy",
+      "title": "CPU 사용률",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -240,14 +240,14 @@
           "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
           "range": true,
           "refId": "A",
-          "legendFormat": "busy"
+          "legendFormat": "사용률"
         }
       ]
     },
     {
       "id": 4,
       "type": "stat",
-      "title": "Memory Used",
+      "title": "메모리 사용률",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -310,14 +310,14 @@
           "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
           "range": true,
           "refId": "A",
-          "legendFormat": "mem"
+          "legendFormat": "메모리"
         }
       ]
     },
     {
       "id": 5,
       "type": "stat",
-      "title": "Load (1m)",
+      "title": "부하 (1분)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -380,14 +380,14 @@
           "expr": "node_load1",
           "range": true,
           "refId": "A",
-          "legendFormat": "load1"
+          "legendFormat": "1분"
         }
       ]
     },
     {
       "id": 6,
       "type": "stat",
-      "title": "Root Disk Used",
+      "title": "루트 디스크 사용률",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -450,14 +450,14 @@
           "expr": "100 - (node_filesystem_avail_bytes{mountpoint=\"/\"} * 100 / node_filesystem_size_bytes{mountpoint=\"/\"})",
           "range": true,
           "refId": "A",
-          "legendFormat": "disk"
+          "legendFormat": "디스크"
         }
       ]
     },
     {
       "id": 7,
       "type": "stat",
-      "title": "Net In",
+      "title": "수신 트래픽",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -511,14 +511,14 @@
           "expr": "sum(rate(node_network_receive_bytes_total{device!=\"lo\"}[1m]))",
           "range": true,
           "refId": "A",
-          "legendFormat": "rx"
+          "legendFormat": "수신"
         }
       ]
     },
     {
       "id": 8,
       "type": "stat",
-      "title": "Procs Running",
+      "title": "실행 중 프로세스",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -572,14 +572,14 @@
           "expr": "node_procs_running",
           "range": true,
           "refId": "A",
-          "legendFormat": "run"
+          "legendFormat": "실행 중"
         }
       ]
     },
     {
       "id": 9,
       "type": "row",
-      "title": "CPU & Load",
+      "title": "CPU & 부하",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -592,7 +592,7 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "CPU Usage by Mode %",
+      "title": "모드별 CPU 사용률 %",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -664,7 +664,7 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Load Average (1 / 5 / 15m)",
+      "title": "부하 평균 (1/5/15분)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -721,7 +721,7 @@
           "expr": "node_load1",
           "range": true,
           "refId": "A",
-          "legendFormat": "1m"
+          "legendFormat": "1분"
         },
         {
           "datasource": {
@@ -732,7 +732,7 @@
           "expr": "node_load5",
           "range": true,
           "refId": "B",
-          "legendFormat": "5m"
+          "legendFormat": "5분"
         },
         {
           "datasource": {
@@ -743,14 +743,14 @@
           "expr": "node_load15",
           "range": true,
           "refId": "C",
-          "legendFormat": "15m"
+          "legendFormat": "15분"
         }
       ]
     },
     {
       "id": 12,
       "type": "gauge",
-      "title": "CPU Busy %",
+      "title": "CPU 사용률 %",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -811,14 +811,14 @@
           "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
           "range": true,
           "refId": "A",
-          "legendFormat": "busy"
+          "legendFormat": "사용률"
         }
       ]
     },
     {
       "id": 13,
       "type": "row",
-      "title": "Memory",
+      "title": "메모리",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -831,7 +831,7 @@
     {
       "id": 14,
       "type": "timeseries",
-      "title": "Memory Breakdown",
+      "title": "메모리 사용 내역",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -892,7 +892,7 @@
           "expr": "node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes - node_memory_Cached_bytes",
           "range": true,
           "refId": "A",
-          "legendFormat": "used"
+          "legendFormat": "사용"
         },
         {
           "datasource": {
@@ -903,7 +903,7 @@
           "expr": "node_memory_Buffers_bytes",
           "range": true,
           "refId": "B",
-          "legendFormat": "buffers"
+          "legendFormat": "버퍼"
         },
         {
           "datasource": {
@@ -914,7 +914,7 @@
           "expr": "node_memory_Cached_bytes",
           "range": true,
           "refId": "C",
-          "legendFormat": "cached"
+          "legendFormat": "캐시"
         },
         {
           "datasource": {
@@ -925,14 +925,14 @@
           "expr": "node_memory_MemFree_bytes",
           "range": true,
           "refId": "D",
-          "legendFormat": "free"
+          "legendFormat": "여유"
         }
       ]
     },
     {
       "id": 15,
       "type": "gauge",
-      "title": "Memory Used %",
+      "title": "메모리 사용률 %",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -993,14 +993,14 @@
           "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
           "range": true,
           "refId": "A",
-          "legendFormat": "used"
+          "legendFormat": "사용률"
         }
       ]
     },
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Swap Usage",
+      "title": "스왑 사용량",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1057,14 +1057,14 @@
           "expr": "node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes",
           "range": true,
           "refId": "A",
-          "legendFormat": "swap used"
+          "legendFormat": "스왑 사용량"
         }
       ]
     },
     {
       "id": 17,
       "type": "row",
-      "title": "Disk",
+      "title": "디스크",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1077,7 +1077,7 @@
     {
       "id": 18,
       "type": "timeseries",
-      "title": "Disk Throughput",
+      "title": "디스크 처리량",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1134,7 +1134,7 @@
           "expr": "sum(rate(node_disk_read_bytes_total[1m]))",
           "range": true,
           "refId": "A",
-          "legendFormat": "read"
+          "legendFormat": "읽기"
         },
         {
           "datasource": {
@@ -1145,14 +1145,14 @@
           "expr": "sum(rate(node_disk_written_bytes_total[1m]))",
           "range": true,
           "refId": "B",
-          "legendFormat": "write"
+          "legendFormat": "쓰기"
         }
       ]
     },
     {
       "id": 19,
       "type": "timeseries",
-      "title": "Disk IOPS",
+      "title": "디스크 IOPS",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1209,7 +1209,7 @@
           "expr": "sum(rate(node_disk_reads_completed_total[1m]))",
           "range": true,
           "refId": "A",
-          "legendFormat": "reads/s"
+          "legendFormat": "읽기/초"
         },
         {
           "datasource": {
@@ -1220,14 +1220,14 @@
           "expr": "sum(rate(node_disk_writes_completed_total[1m]))",
           "range": true,
           "refId": "B",
-          "legendFormat": "writes/s"
+          "legendFormat": "쓰기/초"
         }
       ]
     },
     {
       "id": 20,
       "type": "bargauge",
-      "title": "Filesystem Usage by Mount",
+      "title": "마운트별 파일시스템 사용률",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1295,7 +1295,7 @@
     {
       "id": 21,
       "type": "row",
-      "title": "Network & Kernel",
+      "title": "네트워크 & 커널",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1308,7 +1308,7 @@
     {
       "id": 22,
       "type": "timeseries",
-      "title": "Network Traffic (RX / TX)",
+      "title": "네트워크 트래픽 (수신/송신)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1364,7 +1364,7 @@
           "expr": "sum by (device) (rate(node_network_receive_bytes_total{device!=\"lo\"}[1m]))",
           "range": true,
           "refId": "A",
-          "legendFormat": "rx {{device}}"
+          "legendFormat": "수신 {{device}}"
         },
         {
           "datasource": {
@@ -1375,14 +1375,14 @@
           "expr": "-sum by (device) (rate(node_network_transmit_bytes_total{device!=\"lo\"}[1m]))",
           "range": true,
           "refId": "B",
-          "legendFormat": "tx {{device}}"
+          "legendFormat": "송신 {{device}}"
         }
       ]
     },
     {
       "id": 23,
       "type": "timeseries",
-      "title": "Network Errors & Drops (rate)",
+      "title": "네트워크 오류 & 드롭 (초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1439,7 +1439,7 @@
           "expr": "sum(rate(node_network_receive_errs_total{device!=\"lo\"}[5m]))",
           "range": true,
           "refId": "A",
-          "legendFormat": "rx errs/s"
+          "legendFormat": "수신 오류/초"
         },
         {
           "datasource": {
@@ -1450,14 +1450,14 @@
           "expr": "sum(rate(node_network_receive_drop_total{device!=\"lo\"}[5m]))",
           "range": true,
           "refId": "B",
-          "legendFormat": "rx drops/s"
+          "legendFormat": "수신 드롭/초"
         }
       ]
     },
     {
       "id": 24,
       "type": "timeseries",
-      "title": "Context Switches & Forks (rate)",
+      "title": "컨텍스트 스위치 & Fork (초당)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1514,7 +1514,7 @@
           "expr": "rate(node_context_switches_total[1m])",
           "range": true,
           "refId": "A",
-          "legendFormat": "ctx switch/s"
+          "legendFormat": "컨텍스트 스위치/초"
         },
         {
           "datasource": {
@@ -1525,14 +1525,14 @@
           "expr": "rate(node_forks_total[1m])",
           "range": true,
           "refId": "B",
-          "legendFormat": "forks/s"
+          "legendFormat": "Fork/초"
         }
       ]
     },
     {
       "id": 25,
       "type": "timeseries",
-      "title": "TCP Established Connections",
+      "title": "TCP 연결 수 (ESTABLISHED)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1589,14 +1589,14 @@
           "expr": "node_netstat_Tcp_CurrEstab",
           "range": true,
           "refId": "A",
-          "legendFormat": "established"
+          "legendFormat": "연결됨"
         }
       ]
     },
     {
       "id": 26,
       "type": "timeseries",
-      "title": "Processes (running / blocked)",
+      "title": "프로세스 (실행 중/대기 중)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -1653,7 +1653,7 @@
           "expr": "node_procs_running",
           "range": true,
           "refId": "A",
-          "legendFormat": "running"
+          "legendFormat": "실행 중"
         },
         {
           "datasource": {
@@ -1664,14 +1664,14 @@
           "expr": "node_procs_blocked",
           "range": true,
           "refId": "B",
-          "legendFormat": "blocked"
+          "legendFormat": "대기 중"
         }
       ]
     },
     {
       "id": 27,
       "type": "row",
-      "title": "Logs",
+      "title": "로그",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1684,7 +1684,7 @@
     {
       "id": 28,
       "type": "logs",
-      "title": "System Logs \u2014 errors & warnings (/var/log)",
+      "title": "시스템 로그 — 에러 & 경고 (/var/log)",
       "datasource": {
         "type": "loki",
         "uid": "Loki"
@@ -1740,7 +1740,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "System Performance Monitoring",
+  "title": "시스템 성능 모니터링",
   "uid": "system-perf-monitoring",
   "version": 1
 }
