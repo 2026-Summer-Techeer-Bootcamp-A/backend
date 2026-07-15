@@ -1,3 +1,8 @@
+# torch가 sentence-transformers의 의존성으로 딸려오는데, 기본 PyPI wheel은 CUDA
+# 런타임(nvidia-cu*)까지 같이 받는다. 이 서버는 GPU가 없고 BGE-M3도 CPU로만
+# 돌리므로 CPU 전용 wheel 인덱스를 우선 사용해 이미지에서 CUDA 스택을 뺀다.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 fastapi>=0.115,<0.116
 uvicorn[standard]>=0.34,<0.35
 prometheus-fastapi-instrumentator>=7.0,<8.0
