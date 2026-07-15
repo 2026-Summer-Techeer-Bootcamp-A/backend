@@ -20,7 +20,7 @@ _POOL_WHERE = (
 
 
 def co_occurring_skills(
-    session: Session, skill_name: str, pool: str | None = None, limit: int = 8
+    session: Session, skill_name: str, pool: str | None = None, limit: int = 8, verbose: bool = False
 ) -> dict | None:
     resolved = resolve_skill(session, skill_name)
     if not resolved:
@@ -43,22 +43,24 @@ def co_occurring_skills(
         return None
 
     # 1-hop: 루트 기술과 직접 공동출현하는 이웃 기술 목록 (skill_id도 함께 조회)
+    sql_1hop = (
+        f"SELECT s2.canonical, s2.id, COUNT(DISTINCT pt2.posting_id) n "
+        f"FROM posting_tech pt1 "
+        f"JOIN posting_tech pt2 ON pt1.posting_id = pt2.posting_id "
+        f"  AND pt2.skill_id <> pt1.skill_id AND pt2.is_deleted = false "
+        f"JOIN skill s2 ON s2.id = pt2.skill_id "
+        f"JOIN posting p ON p.id = pt1.posting_id "
+        f"WHERE pt1.skill_id = :sid AND pt1.is_deleted = false AND {_POOL_WHERE} "
+        f"GROUP BY s2.canonical, s2.id ORDER BY n DESC LIMIT :limit"
+    )
     rows = session.execute(
-        text(
-            f"SELECT s2.canonical, s2.id, COUNT(DISTINCT pt2.posting_id) n "
-            f"FROM posting_tech pt1 "
-            f"JOIN posting_tech pt2 ON pt1.posting_id = pt2.posting_id "
-            f"  AND pt2.skill_id <> pt1.skill_id AND pt2.is_deleted = false "
-            f"JOIN skill s2 ON s2.id = pt2.skill_id "
-            f"JOIN posting p ON p.id = pt1.posting_id "
-            f"WHERE pt1.skill_id = :sid AND pt1.is_deleted = false AND {_POOL_WHERE} "
-            f"GROUP BY s2.canonical, s2.id ORDER BY n DESC LIMIT :limit"
-        ),
+        text(sql_1hop),
         {"sid": skill_id, "pool": pool, "limit": limit},
     ).all()
 
     items, edges, nodes = [], [], [{"id": canonical, "root": True, "hop": 0}]
     neighbor_ids: list[int] = []
+    sql_cross: str | None = None
     neighbor_names: set[str] = set()
 
     for name, skill_id_2, n in rows:
@@ -72,21 +74,22 @@ def co_occurring_skills(
     # 2-hop 크로스엣지: 이웃 기술들끼리의 공동출현 (이웃 IN × 이웃 IN, pt2.skill_id > pt1.skill_id 로 중복 제거)
     if len(neighbor_ids) >= 2:
         id_list = ",".join(str(i) for i in neighbor_ids)
+        sql_cross = (
+            f"SELECT s1.canonical sa, s2.canonical sb, COUNT(DISTINCT pt1.posting_id) n "
+            f"FROM posting_tech pt1 "
+            f"JOIN posting_tech pt2 ON pt1.posting_id = pt2.posting_id "
+            f"  AND pt2.skill_id > pt1.skill_id AND pt2.is_deleted = false "
+            f"JOIN skill s1 ON s1.id = pt1.skill_id "
+            f"JOIN skill s2 ON s2.id = pt2.skill_id "
+            f"JOIN posting p ON p.id = pt1.posting_id "
+            f"WHERE pt1.skill_id IN ({id_list}) "
+            f"  AND pt2.skill_id IN ({id_list}) "
+            f"  AND pt1.is_deleted = false AND {_POOL_WHERE} "
+            f"GROUP BY s1.canonical, s2.canonical "
+            f"ORDER BY n DESC LIMIT 20"
+        )
         cross_rows = session.execute(
-            text(
-                f"SELECT s1.canonical sa, s2.canonical sb, COUNT(DISTINCT pt1.posting_id) n "
-                f"FROM posting_tech pt1 "
-                f"JOIN posting_tech pt2 ON pt1.posting_id = pt2.posting_id "
-                f"  AND pt2.skill_id > pt1.skill_id AND pt2.is_deleted = false "
-                f"JOIN skill s1 ON s1.id = pt1.skill_id "
-                f"JOIN skill s2 ON s2.id = pt2.skill_id "
-                f"JOIN posting p ON p.id = pt1.posting_id "
-                f"WHERE pt1.skill_id IN ({id_list}) "
-                f"  AND pt2.skill_id IN ({id_list}) "
-                f"  AND pt1.is_deleted = false AND {_POOL_WHERE} "
-                f"GROUP BY s1.canonical, s2.canonical "
-                f"ORDER BY n DESC LIMIT 20"
-            ),
+            text(sql_cross),
             {"pool": pool},
         ).all()
 
@@ -102,6 +105,16 @@ def co_occurring_skills(
                 })
 
     facts = "; ".join(f"{it['name']} {it['pct']}%" for it in items)
+    debug = (
+        {
+            "strength_formula": "strength = (동반 공고 n건 / 대상 기술 기준 공고 base건) x 100",
+            "base_postings": base,
+            "sql_1hop": sql_1hop,
+            "sql_2hop_cross": sql_cross,
+        }
+        if verbose
+        else None
+    )
     return {
         "tool": "graph",
         "tool_result": {
@@ -110,6 +123,7 @@ def co_occurring_skills(
             "items": items,
             "nodes": nodes,
             "edges": edges,
+            "debug": debug,
         },
         "citation": {
             "type": "graph",
