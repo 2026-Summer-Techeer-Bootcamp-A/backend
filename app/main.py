@@ -434,6 +434,11 @@ Instrumentator().instrument(
 # 합산해서 응답해야 전체 워커 합계가 나온다.
 @app.get("/metrics")
 def metrics():
+    # PROMETHEUS_MULTIPROC_DIR은 컨테이너(entrypoint.sh)에서만 준비된다. 테스트
+    # venv처럼 그 변수가 없는 환경에서는 멀티프로세스 collector가 바로 예외를
+    # 던지므로, 그럴 때는 단일 프로세스 기본 레지스트리로 폴백한다.
+    if not os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
     registry = CollectorRegistry()
     multiprocess.MultiProcessCollector(registry)
     return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
