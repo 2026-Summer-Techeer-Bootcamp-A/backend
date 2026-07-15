@@ -290,6 +290,10 @@ def test_newcomer_gate_computes_open_rate(client: TestClient) -> None:
     assert python_item["postings"] == 1
     assert python_item["open_rate"] == 100.0
 
+    # 공고 단위(DISTINCT) 신입 비율: domestic career_min 있는 공고 toss(0)·kakao(3)·naver(0)
+    # = 3건 중 신입 가능(career_min<=0) 2건 -> 66.7% (상위 스킬 가중평균이 아님).
+    assert body["overall"] == {"newcomer_postings": 2, "total_postings": 3, "newcomer_pct": 66.7}
+
 
 def test_global_domestic_gap_never_mixes_pools(client: TestClient) -> None:
     resp = client.get("/api/v1/stats/global-domestic-gap")
@@ -459,6 +463,11 @@ def test_newcomer_gate_cache_hit_skips_database(
             }
         ],
         "pool": "domestic",
+        "overall": {
+            "newcomer_postings": 5,
+            "total_postings": 10,
+            "newcomer_pct": 50.0,
+        },
         "as_of": "2026-07-14",
         "sample_size": 10,
         "sample_warning": True,

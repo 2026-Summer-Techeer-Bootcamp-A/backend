@@ -50,6 +50,7 @@ from app.schemas.insight import (
     HypeVsHireResponse,
     IndustryFingerprintResponse,
     NewcomerGateResponse,
+    NewcomerOverall,
     PostingTimelineResponse,
     RegionDensityResponse,
     ResponseRateResponse,
@@ -106,9 +107,15 @@ def stats_newcomer_gate(
             except (ValidationError, ValueError, TypeError):
                 logger.warning("신입 채용 개방도 캐시 데이터 검증 실패", exc_info=True)
 
-    items, sample_size = get_newcomer_gate(session=session, limit=limit)
+    items, sample_size, newcomer_total = get_newcomer_gate(session=session, limit=limit)
+    newcomer_pct = round(newcomer_total / sample_size * 100, 1) if sample_size else 0.0
     response = NewcomerGateResponse(
         items=items,
+        overall=NewcomerOverall(
+            newcomer_postings=newcomer_total,
+            total_postings=sample_size,
+            newcomer_pct=newcomer_pct,
+        ),
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=sample_size < 50,
