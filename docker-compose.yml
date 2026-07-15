@@ -11,7 +11,14 @@ services:
   app:
     build: .
     image: ${APP_IMAGE:-career-backend:local}
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "9"]
+    # uvicorn 워커는 (2*cores)+1 공식(동기 워커용)이 아니라 vCPU 수에 맞춘다 — 워커
+    # 하나가 이미 비동기 이벤트 루프라 I/O 바운드 요청은 워커 하나로도 동시 처리가
+    # 되고, 워커를 늘리는 건 CPU 코어를 나눠 쓰기 위함이다. 이 VM은 4 vCPU를 uvicorn
+    # 뿐 아니라 Traefik/Prometheus/Loki/Tempo/Grafana/Alloy와도 나눠 쓰므로 9는
+    # 과할당이었다(부하 테스트 중 CPU 오버섭스크립션으로 확인됨). 워커 수가 줄면
+    # 워커당 pool_size=30인 SQLAlchemy 커넥션 풀의 최대 총량(workers*40)도 같이
+    # 줄어 2 vCPU짜리 DB(db-custom-2-7680) 부담도 낮아진다.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
     env_file:
       - .env
     restart: unless-stopped
