@@ -14,6 +14,10 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    environment:
+      - HF_HOME=/models
+    volumes:
+      - model-cache:/models
     logging: *default-logging
     labels:
       - "traefik.enable=true"
@@ -160,3 +164,4 @@ services:
 
 volumes:
   traefik-certificates:
+  model-cache:
