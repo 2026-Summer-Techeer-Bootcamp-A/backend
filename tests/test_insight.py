@@ -227,23 +227,6 @@ def client() -> Iterator[TestClient]:
             )
         )
 
-        # mv_newcomer_gate는 시드된 실제 공고에서 그대로 파생한다(Postgres MV 대역).
-        seed.execute(
-            text(
-                """
-                CREATE TABLE mv_newcomer_gate AS
-                SELECT s.canonical AS skill_canonical,
-                       COUNT(DISTINCT p.id) AS postings,
-                       SUM(CASE WHEN p.career_min <= 0 THEN 1 ELSE 0 END) AS newcomer_postings
-                FROM posting p
-                JOIN posting_tech pt ON pt.posting_id = p.id AND pt.is_deleted = 0
-                JOIN skill s ON s.id = pt.skill_id AND s.is_deleted = 0
-                WHERE p.pool = 'domestic' AND p.is_deleted = 0 AND p.career_min IS NOT NULL
-                GROUP BY s.canonical
-                """
-            )
-        )
-
         seed.execute(
             text(
                 """
