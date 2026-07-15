@@ -3,25 +3,16 @@
 import hashlib
 import logging
 
-import redis
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 
 from app.core.config import settings
+from app.core.redis import redis_client
 from app.schemas.search import SearchCachePayload
 
 logger = logging.getLogger(__name__)
 
 SEARCH_CACHE_KEY_PREFIX = "search:v1"
-
-# 검색 캐시는 성능 보조 기능이다. Redis 장애가 검색 API를 오래 막지 않도록
-# 인증·이력서 세션용 공용 클라이언트와 분리하고 짧은 타임아웃을 적용한다.
-redis_client = redis.from_url(
-    settings.redis_url,
-    decode_responses=True,
-    socket_connect_timeout=settings.search_cache_socket_timeout_seconds,
-    socket_timeout=settings.search_cache_socket_timeout_seconds,
-)
 
 
 def normalize_search_query(query: str) -> str:
