@@ -97,23 +97,22 @@ def top_skills(
     limit: int = 8,
     category: str | None = None,
     entry_level: bool = False,
+    verbose: bool = False,
 ) -> dict:
     total = total_postings(session, pool, category=category, entry_level=entry_level)
     join = _category_join(category)
     where_extra = _entry_level_where(entry_level)
     count_expr = "COUNT(DISTINCT pt.posting_id)" if category else "COUNT(*)"
-    rows = _top(
-        session,
+    extra_params = _filter_params(category)
+    sql = (
         f"SELECT s.canonical, {count_expr} n FROM posting_tech pt "
         f"JOIN skill s ON s.id = pt.skill_id "
         f"JOIN posting p ON p.id = pt.posting_id "
         f"{join}"
         f"WHERE {_POOL_WHERE} AND pt.is_deleted = false{where_extra} "
-        f"GROUP BY s.canonical ORDER BY n DESC LIMIT :limit",
-        pool,
-        limit,
-        extra_params=_filter_params(category),
+        f"GROUP BY s.canonical ORDER BY n DESC LIMIT :limit"
     )
+    rows = _top(session, sql, pool, limit, extra_params=extra_params)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
@@ -134,9 +133,14 @@ def top_skills(
         label = "수요 상위 기술"
         citation_label = f"기술태그 집계 · 공고 {total:,}건"
         facts = f"pool={pool or '전체'} 총 {total:,}건 기준 상위 기술 — {facts_body}"
+    debug = (
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}}
+        if verbose
+        else None
+    )
     return {
         "tool": "sql",
-        "tool_result": {"kind": "list", "label": label, "items": items},
+        "tool_result": {"kind": "list", "label": label, "items": items, "debug": debug},
         "citation": {
             "type": "sql",
             "ref": "채용공고·기술 태그",
@@ -147,26 +151,27 @@ def top_skills(
     }
 
 
-def top_concepts(session: Session, pool: str | None = None, limit: int = 8) -> dict:
+def top_concepts(
+    session: Session, pool: str | None = None, limit: int = 8, verbose: bool = False
+) -> dict:
     total = total_postings(session, pool)
-    rows = _top(
-        session,
+    sql = (
         f"SELECT c.name, COUNT(*) n FROM posting_concept pc "
         f"JOIN concept c ON c.id = pc.concept_id "
         f"JOIN posting p ON p.id = pc.posting_id "
         f"WHERE {_POOL_WHERE} AND pc.is_deleted = false "
-        f"GROUP BY c.name ORDER BY n DESC LIMIT :limit",
-        pool,
-        limit,
+        f"GROUP BY c.name ORDER BY n DESC LIMIT :limit"
     )
+    rows = _top(session, sql, pool, limit)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
     ]
     facts = "; ".join(f"{n} {c}건" for n, c in rows)
+    debug = {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}} if verbose else None
     return {
         "tool": "sql",
-        "tool_result": {"kind": "list", "label": "빈출 개념·패러다임", "items": items},
+        "tool_result": {"kind": "list", "label": "빈출 개념·패러다임", "items": items, "debug": debug},
         "citation": {
             "type": "sql",
             "ref": "채용공고·개념",
@@ -183,23 +188,22 @@ def top_certs(
     limit: int = 8,
     category: str | None = None,
     entry_level: bool = False,
+    verbose: bool = False,
 ) -> dict:
     total = total_postings(session, pool, category=category, entry_level=entry_level)
     join = _category_join(category)
     where_extra = _entry_level_where(entry_level)
     count_expr = "COUNT(DISTINCT pc.posting_id)" if category else "COUNT(*)"
-    rows = _top(
-        session,
+    extra_params = _filter_params(category)
+    sql = (
         f"SELECT ct.name, {count_expr} n FROM posting_cert pc "
         f"JOIN cert ct ON ct.id = pc.cert_id "
         f"JOIN posting p ON p.id = pc.posting_id "
         f"{join}"
         f"WHERE {_POOL_WHERE} AND pc.is_deleted = false{where_extra} "
-        f"GROUP BY ct.name ORDER BY n DESC LIMIT :limit",
-        pool,
-        limit,
-        extra_params=_filter_params(category),
+        f"GROUP BY ct.name ORDER BY n DESC LIMIT :limit"
     )
+    rows = _top(session, sql, pool, limit, extra_params=extra_params)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
@@ -218,9 +222,14 @@ def top_certs(
         label = "요구 상위 자격증"
         citation_label = f"자격증 요구 집계 · 공고 {total:,}건"
         facts = f"pool={pool or '전체'} 총 {total:,}건 기준 상위 자격증 — {facts_body}"
+    debug = (
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}}
+        if verbose
+        else None
+    )
     return {
         "tool": "sql",
-        "tool_result": {"kind": "list", "label": label, "items": items},
+        "tool_result": {"kind": "list", "label": label, "items": items, "debug": debug},
         "citation": {
             "type": "sql",
             "ref": "채용공고·자격증",
@@ -231,24 +240,25 @@ def top_certs(
     }
 
 
-def top_locations(session: Session, pool: str | None = None, limit: int = 8) -> dict:
+def top_locations(
+    session: Session, pool: str | None = None, limit: int = 8, verbose: bool = False
+) -> dict:
     total = total_postings(session, pool)
-    rows = _top(
-        session,
+    sql = (
         f"SELECT p.region_district, COUNT(*) n FROM posting p "
         f"WHERE {_POOL_WHERE} AND p.region_district IS NOT NULL "
-        f"GROUP BY p.region_district ORDER BY n DESC LIMIT :limit",
-        pool,
-        limit,
+        f"GROUP BY p.region_district ORDER BY n DESC LIMIT :limit"
     )
+    rows = _top(session, sql, pool, limit)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
     ]
     facts = "; ".join(f"{n} {c}건({round(100 * c / total, 1) if total else 0}%)" for n, c in rows)
+    debug = {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}} if verbose else None
     return {
         "tool": "sql",
-        "tool_result": {"kind": "list", "label": "지역별 공고 분포", "items": items},
+        "tool_result": {"kind": "list", "label": "지역별 공고 분포", "items": items, "debug": debug},
         "citation": {
             "type": "sql",
             "ref": "채용공고·지역",
@@ -268,6 +278,7 @@ def skill_demand(
     pool: str | None = None,
     category: str | None = None,
     entry_level: bool = False,
+    verbose: bool = False,
 ) -> dict | None:
     resolved = resolve_skill(session, skill_name)
     if not resolved:
@@ -278,18 +289,13 @@ def skill_demand(
     where_extra = _entry_level_where(entry_level)
     params: dict[str, object] = {"sid": skill_id, "pool": norm_pool(pool)}
     params.update(_filter_params(category))
-    n = int(
-        session.execute(
-            text(
-                f"SELECT COUNT(DISTINCT pt.posting_id) FROM posting_tech pt "
-                f"JOIN posting p ON p.id = pt.posting_id "
-                f"{join}"
-                f"WHERE pt.skill_id = :sid AND pt.is_deleted = false AND {_POOL_WHERE}{where_extra}"
-            ),
-            params,
-        ).scalar()
-        or 0
+    sql = (
+        f"SELECT COUNT(DISTINCT pt.posting_id) FROM posting_tech pt "
+        f"JOIN posting p ON p.id = pt.posting_id "
+        f"{join}"
+        f"WHERE pt.skill_id = :sid AND pt.is_deleted = false AND {_POOL_WHERE}{where_extra}"
     )
+    n = int(session.execute(text(sql), params).scalar() or 0)
     pct = round(100 * n / total, 1) if total else 0.0
     if category or entry_level:
         label = f"{canonical} 수요{_filter_label_suffix(category, entry_level)}"
@@ -305,6 +311,7 @@ def skill_demand(
         label = f"{canonical} 수요"
         citation_label = f"{canonical} 요구 공고 {n:,}건"
         facts = f"{canonical}을(를) 요구하는 공고는 {n:,}건(pool={pool or '전체'} {total:,}건 중 {pct}%)"
+    debug = {"sql": sql, "params": params} if verbose else None
     return {
         "tool": "sql",
         "tool_result": {
@@ -313,6 +320,7 @@ def skill_demand(
             "value": n,
             "unit": "건",
             "items": [{"name": canonical, "metric": f"{n:,}건", "pct": pct}],
+            "debug": debug,
         },
         "citation": {
             "type": "sql",
@@ -330,6 +338,7 @@ def multi_skill_compare(
     pool: str | None = None,
     category: str | None = None,
     entry_level: bool = False,
+    verbose: bool = False,
 ) -> dict | None:
     """여러 기술의 수요를 한 번에 비교한다 (compare 결과 kind=list 반환).
 
@@ -339,6 +348,7 @@ def multi_skill_compare(
     total = total_postings(session, pool, category=category, entry_level=entry_level)
     items = []
     resolved_names = []
+    last_sql: str | None = None
 
     for name in skill_names:
         resolved = resolve_skill(session, name)
@@ -349,18 +359,14 @@ def multi_skill_compare(
         where_extra = _entry_level_where(entry_level)
         params: dict[str, object] = {"sid": skill_id, "pool": norm_pool(pool)}
         params.update(_filter_params(category))
-        n = int(
-            session.execute(
-                text(
-                    f"SELECT COUNT(DISTINCT pt.posting_id) FROM posting_tech pt "
-                    f"JOIN posting p ON p.id = pt.posting_id "
-                    f"{join}"
-                    f"WHERE pt.skill_id = :sid AND pt.is_deleted = false AND {_POOL_WHERE}{where_extra}"
-                ),
-                params,
-            ).scalar()
-            or 0
+        sql = (
+            f"SELECT COUNT(DISTINCT pt.posting_id) FROM posting_tech pt "
+            f"JOIN posting p ON p.id = pt.posting_id "
+            f"{join}"
+            f"WHERE pt.skill_id = :sid AND pt.is_deleted = false AND {_POOL_WHERE}{where_extra}"
         )
+        last_sql = sql
+        n = int(session.execute(text(sql), params).scalar() or 0)
         pct = round(100 * n / total, 1) if total else 0.0
         items.append({"name": canonical, "metric": f"{n:,}건", "pct": pct})
         resolved_names.append(canonical)
@@ -374,12 +380,21 @@ def multi_skill_compare(
     facts = (
         f"국내 채용 공고 {total:,}건 기준 {skills_joined} 비교 결과{filter_suffix} — {facts_body}"
     )
+    debug = (
+        {
+            "sql": last_sql,
+            "note": "동일 SQL을 기술마다 :sid만 바꿔 재실행(위는 마지막 실행분)",
+        }
+        if verbose
+        else None
+    )
     return {
         "tool": "sql",
         "tool_result": {
             "kind": "compare",
             "label": f"{skills_joined} 수요 비교{filter_suffix}",
             "items": items,
+            "debug": debug,
         },
         "citation": {
             "type": "sql",
