@@ -529,6 +529,21 @@ def stats_concept_tech(
     top_techs: Annotated[int, Query(ge=1, le=20, description="개념당 상위 기술 수")] = 5,
 ) -> ConceptTechResponse:
     """개념→기술 Sankey. posting_concept×posting_tech 공동출현 상위 개념 × 개념당 상위 기술."""
+    return resolve_concept_tech(
+        session,
+        pool=pool,
+        top_concepts=top_concepts,
+        top_techs=top_techs,
+    )
+
+
+def resolve_concept_tech(
+    session: SessionDep,
+    *,
+    pool: Pool,
+    top_concepts: int,
+    top_techs: int,
+) -> ConceptTechResponse:
     cache_key = make_reference_cache_key(
         "stats_concept_tech", {"pool": pool, "top_concepts": top_concepts, "top_techs": top_techs}
     )
@@ -543,8 +558,16 @@ def stats_concept_tech(
         links=result["links"],
         as_of=date.today().isoformat(),
     )
-    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    # Do not pin an empty pre-ETL response in Redis for the full cache TTL.
+    if response.nodes:
+        set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
     return response
+
+
+def warm_concept_tech_cache(session: SessionDep) -> None:
+    """Warm the exact concept-tech queries used by the dashboard."""
+    for pool in ("domestic", "global"):
+        resolve_concept_tech(session, pool=pool, top_concepts=20, top_techs=4)
 
 
 @router.get("/stats/skill-count-dist", response_model=SkillCountDistResponse)
