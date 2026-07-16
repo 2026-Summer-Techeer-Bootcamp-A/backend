@@ -35,7 +35,13 @@ def session(pg_conn: object) -> Iterator[Session]:
         )
         s.add(posting)
         s.flush()
-        s.add(PostingEmbedding(id=posting.id, embedding=FAKE_VEC, model="fake"))
+        # semantic_search는 is_tech_posting=true인 행만 본다. 기본값은 false라, 개발
+        # 공고로 표시하지 않으면 이 시드는 검색 대상에서 빠져 결과가 None이 된다.
+        s.add(
+            PostingEmbedding(
+                id=posting.id, embedding=FAKE_VEC, model="fake", is_tech_posting=True
+            )
+        )
         s.commit()
         posting_id = posting.id
         try:
