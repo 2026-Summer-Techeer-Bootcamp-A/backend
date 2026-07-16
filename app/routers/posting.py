@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
+from app.core.config import settings
 from app.core.deps import SessionDep
 from app.crud.posting import get_nearby_postings, get_posting_detail, get_similar_postings, list_posting_cards
 from app.routers.match import get_user_from_optional_authorization
@@ -14,6 +15,7 @@ from app.schemas.posting import (
     PostingSort,
     SimilarPostingsResponse,
 )
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 
 router = APIRouter()
@@ -28,7 +30,14 @@ def get_posting(
     posting_id: int,
     session: SessionDep,
 ) -> PostingDetailResponse:
-    return PostingDetailResponse(**get_posting_detail(session, posting_id=posting_id))
+    cache_key = make_reference_cache_key("posting_detail", {"posting_id": posting_id})
+    cached = get_cached(cache_key, PostingDetailResponse)
+    if cached is not None:
+        return cached
+
+    response = PostingDetailResponse(**get_posting_detail(session, posting_id=posting_id))
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get(
@@ -57,8 +66,15 @@ def get_posting_similar(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> SimilarPostingsResponse:
     """자기 자신을 제외한, 요구 기술 겹침이 많은 순 유사 공고."""
+    cache_key = make_reference_cache_key("posting_similar", {"posting_id": posting_id, "limit": limit})
+    cached = get_cached(cache_key, SimilarPostingsResponse)
+    if cached is not None:
+        return cached
+
     items = get_similar_postings(session, posting_id=posting_id, limit=limit)
-    return SimilarPostingsResponse(items=items, as_of=date.today().isoformat())
+    response = SimilarPostingsResponse(items=items, as_of=date.today().isoformat())
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get(

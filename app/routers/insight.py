@@ -81,14 +81,21 @@ def trend_hype_vs_hire(
     skill: Annotated[str, Query(description="canonical 기술명")],
 ) -> HypeVsHireResponse:
     """관심(HN 언급) vs 실수요(공고) 괴리를 분기별로 비교합니다. add가 taxonomy 밖이면 422."""
+    cache_key = make_reference_cache_key("trend_hype_vs_hire", {"skill": skill})
+    cached = get_cached(cache_key, HypeVsHireResponse)
+    if cached is not None:
+        return cached
+
     result = get_hype_vs_hire(session=session, skill=skill)
-    return HypeVsHireResponse(
+    response = HypeVsHireResponse(
         skill=result["skill"],
         quarters=result["quarters"],
         as_of=date.today().isoformat(),
         sample_size=result["sample_size"],
         note="관심=HN 월별 언급 합계 · 수요=분기별 공고 수(himalayas 제외)",
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/newcomer-gate", response_model=NewcomerGateResponse)
@@ -142,15 +149,22 @@ def stats_global_domestic_gap(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> GlobalDomesticGapResponse:
     """국내/해외 각 풀 내 기술 점유율을 비교합니다(절대 합산하지 않음)."""
+    cache_key = make_reference_cache_key("stats_global_domestic_gap", {"limit": limit})
+    cached = get_cached(cache_key, GlobalDomesticGapResponse)
+    if cached is not None:
+        return cached
+
     global_favored, domestic_favored, global_total, domestic_total = get_global_domestic_gap(
         session=session, limit=limit
     )
-    return GlobalDomesticGapResponse(
+    response = GlobalDomesticGapResponse(
         global_favored=global_favored,
         domestic_favored=domestic_favored,
         as_of=date.today().isoformat(),
         sample_size={"global": global_total, "domestic": domestic_total},
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/hiring-season", response_model=HiringSeasonResponse)
@@ -194,16 +208,25 @@ def stats_industry_fingerprint(
     limit_skills: Annotated[int, Query(ge=1, le=20)] = 8,
 ) -> IndustryFingerprintResponse:
     """산업별 기술 지문(국내 전용). index=산업 내 비중÷전 산업 평균 비중."""
+    cache_key = make_reference_cache_key(
+        "stats_industry_fingerprint", {"limit_industries": limit_industries, "limit_skills": limit_skills}
+    )
+    cached = get_cached(cache_key, IndustryFingerprintResponse)
+    if cached is not None:
+        return cached
+
     industries, sample_size = get_industry_fingerprint(
         session=session, limit_industries=limit_industries, limit_skills=limit_skills
     )
-    return IndustryFingerprintResponse(
+    response = IndustryFingerprintResponse(
         industries=industries,
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=sample_size < 50,
         note="posting.industry는 jumpit text_rule 분류만 신뢰 가능(표본 얇음, 참고용)",
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/role-stack-fit", response_model=RoleStackFitResponse)
@@ -213,15 +236,24 @@ def stats_role_stack_fit(
     top_n_categories: Annotated[int, Query(ge=2, le=10)] = 6,
 ) -> RoleStackFitResponse:
     """직군간 요구 기술 벡터 유사도 매트릭스(0~100). job_category.is_tech=true인 직군만 대상."""
+    cache_key = make_reference_cache_key(
+        "stats_role_stack_fit", {"pool": pool, "top_n_categories": top_n_categories}
+    )
+    cached = get_cached(cache_key, RoleStackFitResponse)
+    if cached is not None:
+        return cached
+
     categories, matrix, sample_size = get_role_stack_fit(
         session=session, pool=pool, top_n_categories=top_n_categories
     )
-    return RoleStackFitResponse(
+    response = RoleStackFitResponse(
         categories=categories,
         matrix=matrix,
         as_of=date.today().isoformat(),
         sample_size=sample_size,
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/skill-share", response_model=SkillShareResponse)
@@ -232,12 +264,21 @@ def stats_skill_share(
     top_k: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> SkillShareResponse:
     """풀(+직군) 내 기술 점유율. mv_skill_share 마트 기반, posting_count 내림차순 top_k."""
+    cache_key = make_reference_cache_key(
+        "stats_skill_share", {"pool": pool, "position": position, "top_k": top_k}
+    )
+    cached = get_cached(cache_key, SkillShareResponse)
+    if cached is not None:
+        return cached
+
     items, sample_size = get_skill_share(session=session, pool=pool, position=position, top_k=top_k)
-    return SkillShareResponse(
+    response = SkillShareResponse(
         items=items,
         as_of=date.today().isoformat(),
         sample_size=sample_size,
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/cooccurrence", response_model=CooccurrenceResponse)
@@ -248,12 +289,21 @@ def stats_cooccurrence(
     top_k: Annotated[int, Query(ge=1, le=200)] = 30,
 ) -> CooccurrenceResponse:
     """기술 co-occurrence 네트워크. skill 지정 시 이웃 링크, 미지정 시 pool 전체 상위 링크(중복 쌍 제거)."""
+    cache_key = make_reference_cache_key(
+        "stats_cooccurrence", {"pool": pool, "skill": skill, "top_k": top_k}
+    )
+    cached = get_cached(cache_key, CooccurrenceResponse)
+    if cached is not None:
+        return cached
+
     nodes, links = get_cooccurrence(session=session, pool=pool, skill=skill, top_k=top_k)
-    return CooccurrenceResponse(
+    response = CooccurrenceResponse(
         nodes=nodes,
         links=links,
         as_of=date.today().isoformat(),
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get(
@@ -272,6 +322,17 @@ def stats_posting_timeline(
 ) -> PostingTimelineResponse:
     """최신 공고 일별 타임라인. resume_id/session_id 지정 시 보유기술과 1개 이상 겹치는 공고 수도 반환."""
     owned_skill_ids = resolve_optional_owned_skill_ids(session, resume_id, session_id, authorization)
+
+    # 보유기술이 섞이면 사용자마다 응답이 달라지므로 익명 요청(owned_skill_ids=None)만 캐시한다.
+    cache_key = None
+    if owned_skill_ids is None:
+        cache_key = make_reference_cache_key(
+            "stats_posting_timeline", {"pool": pool, "days": days, "position": position}
+        )
+        cached = get_cached(cache_key, PostingTimelineResponse)
+        if cached is not None:
+            return cached
+
     daily, as_of = get_posting_timeline(
         session=session,
         pool=pool,
@@ -279,7 +340,10 @@ def stats_posting_timeline(
         owned_skill_ids=owned_skill_ids,
         position=position,
     )
-    return PostingTimelineResponse(daily=daily, as_of=as_of)
+    response = PostingTimelineResponse(daily=daily, as_of=as_of)
+    if cache_key is not None:
+        set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/response-rate", response_model=ResponseRateResponse)
@@ -316,8 +380,13 @@ def stats_skill_trend_yearly(
     top_k: Annotated[int, Query(ge=1, le=50, description="추적할 상위 기술 수")] = 15,
 ) -> SkillTrendYearlyResponse:
     """연도별 기술 점유율 추이 + 급상승/급하락 무버스."""
+    cache_key = make_reference_cache_key("stats_skill_trend_yearly", {"pool": pool, "top_k": top_k})
+    cached = get_cached(cache_key, SkillTrendYearlyResponse)
+    if cached is not None:
+        return cached
+
     result = get_skill_trend_yearly(session=session, pool=pool, top_k=top_k)
-    return SkillTrendYearlyResponse(
+    response = SkillTrendYearlyResponse(
         pool=pool,
         years=result["years"],
         series=result["series"],
@@ -325,6 +394,8 @@ def stats_skill_trend_yearly(
         as_of=date.today().isoformat(),
         sample_size=result["sample_size"],
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/skills/rank-history", response_model=SkillRankHistoryResponse)
@@ -343,6 +414,14 @@ def stats_skill_rank_history(
     절대 점유율(%)은 소스별 수집 규모 차이로 오염돼 노출하지 않고, 결정적 순위만 반환한다.
     동점은 점유율↓ → 공고 수↓ → 이름↑로 처리하며, top_n 밖 연도는 rank를 null로 내린다.
     """
+    cache_key = make_reference_cache_key(
+        "stats_skill_rank_history",
+        {"category": category, "top_n": top_n, "year_from": year_from, "year_to": year_to},
+    )
+    cached = get_cached(cache_key, SkillRankHistoryResponse)
+    if cached is not None:
+        return cached
+
     result = get_skill_rank_history(
         session=session,
         category=category,
@@ -350,7 +429,9 @@ def stats_skill_rank_history(
         year_from=year_from,
         year_to=year_to,
     )
-    return SkillRankHistoryResponse(**result)
+    response = SkillRankHistoryResponse(**result)
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/hot-companies", response_model=HotCompaniesResponse)
@@ -423,14 +504,21 @@ def stats_group_share(
     pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
 ) -> GroupShareResponse:
     """프레임워크/DB 그룹 내 상대 점유율(그룹 union 공고 기준, 대략치). 전체 공고 대비 비율이 아니다."""
+    cache_key = make_reference_cache_key("stats_group_share", {"group": group, "pool": pool})
+    cached = get_cached(cache_key, GroupShareResponse)
+    if cached is not None:
+        return cached
+
     result = get_group_share(session=session, group=group, pool=pool)
-    return GroupShareResponse(
+    response = GroupShareResponse(
         group=group,
         pool=pool,
         union_count=result["union_count"],
         items=result["items"],
         as_of=date.today().isoformat(),
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/concept-tech", response_model=ConceptTechResponse)
@@ -441,13 +529,22 @@ def stats_concept_tech(
     top_techs: Annotated[int, Query(ge=1, le=20, description="개념당 상위 기술 수")] = 5,
 ) -> ConceptTechResponse:
     """개념→기술 Sankey. posting_concept×posting_tech 공동출현 상위 개념 × 개념당 상위 기술."""
+    cache_key = make_reference_cache_key(
+        "stats_concept_tech", {"pool": pool, "top_concepts": top_concepts, "top_techs": top_techs}
+    )
+    cached = get_cached(cache_key, ConceptTechResponse)
+    if cached is not None:
+        return cached
+
     result = get_concept_tech(session=session, pool=pool, top_concepts=top_concepts, top_techs=top_techs)
-    return ConceptTechResponse(
+    response = ConceptTechResponse(
         pool=pool,
         nodes=result["nodes"],
         links=result["links"],
         as_of=date.today().isoformat(),
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/skill-count-dist", response_model=SkillCountDistResponse)
@@ -456,14 +553,21 @@ def stats_skill_count_dist(
     pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
 ) -> SkillCountDistResponse:
     """공고당 요구 스킬 개수 분포(히스토그램) + 평균/중앙값."""
+    cache_key = make_reference_cache_key("stats_skill_count_dist", {"pool": pool})
+    cached = get_cached(cache_key, SkillCountDistResponse)
+    if cached is not None:
+        return cached
+
     result = get_skill_count_dist(session=session, pool=pool)
-    return SkillCountDistResponse(
+    response = SkillCountDistResponse(
         pool=pool,
         histogram=result["histogram"],
         avg=result["avg"],
         median=result["median"],
         as_of=date.today().isoformat(),
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/global-domestic-lag", response_model=GlobalDomesticLagResponse)
@@ -472,12 +576,19 @@ def stats_global_domestic_lag(
     limit: Annotated[int, Query(ge=1, le=30, description="반환할 기술 수")] = 10,
 ) -> GlobalDomesticLagResponse:
     """글로벌 연도 점유율 추이가 국내를 선행하는 근사 시차(교차상관, lag 0~3년). 표본 부족 기술은 제외."""
+    cache_key = make_reference_cache_key("stats_global_domestic_lag", {"limit": limit})
+    cached = get_cached(cache_key, GlobalDomesticLagResponse)
+    if cached is not None:
+        return cached
+
     result = get_global_domestic_lag(session=session, limit=limit)
-    return GlobalDomesticLagResponse(
+    response = GlobalDomesticLagResponse(
         items=result["items"],
         as_of=date.today().isoformat(),
         note="근사·교차상관 기반 — 스크래핑 배치 노이즈와 표본 편향으로 정밀한 시차가 아닌 방향성 참고용",
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 STACK_INSIGHT_CACHE_TTL_SECONDS = 24 * 60 * 60

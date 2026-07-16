@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, Query
 
+from app.core.config import settings
 from app.core.deps import SessionDep
 from app.crud.github_insight import get_github_chronicle, get_github_topics, get_github_vitality
 from app.routers.match import resolve_optional_owned_skill_ids
@@ -13,6 +14,7 @@ from app.schemas.github_insight import (
     GithubTopicsResponse,
     GithubVitalityResponse,
 )
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 router = APIRouter()
 
@@ -20,8 +22,13 @@ router = APIRouter()
 @router.get("/trend/github-vitality", response_model=GithubVitalityResponse)
 def trend_github_vitality(session: SessionDep) -> GithubVitalityResponse:
     """언어별 GitHub 활력도(fork율, issue율, 최근 푸시일) + 채용수요 비교."""
+    cache_key = make_reference_cache_key("trend_github_vitality", {})
+    cached = get_cached(cache_key, GithubVitalityResponse)
+    if cached is not None:
+        return cached
+
     languages, snapshot_date, sample_size = get_github_vitality(session=session)
-    return GithubVitalityResponse(
+    response = GithubVitalityResponse(
         languages=languages,
         as_of=(snapshot_date.isoformat() if snapshot_date else date.today().isoformat()),
         sample_size=sample_size,
@@ -31,6 +38,8 @@ def trend_github_vitality(session: SessionDep) -> GithubVitalityResponse:
             else "github_repo_snapshot 테이블이 비어있음 — scripts/ingest_github_snapshots.py 실행 필요"
         ),
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/trend/github-topics", response_model=GithubTopicsResponse)
@@ -42,8 +51,17 @@ def trend_github_topics(
 ) -> GithubTopicsResponse:
     """GitHub topics 태그 기반 관심(reach) vs 채용수요(job_demand_pct) 비교."""
     owned_skill_ids = resolve_optional_owned_skill_ids(session, resume_id, session_id, authorization)
+
+    # 보유기술이 섞이면 사용자마다 응답이 달라지므로 익명 요청(owned_skill_ids=None)만 캐시한다.
+    cache_key = None
+    if owned_skill_ids is None:
+        cache_key = make_reference_cache_key("trend_github_topics", {})
+        cached = get_cached(cache_key, GithubTopicsResponse)
+        if cached is not None:
+            return cached
+
     items, snapshot_date, sample_size = get_github_topics(session=session, owned_skill_ids=owned_skill_ids)
-    return GithubTopicsResponse(
+    response = GithubTopicsResponse(
         items=items,
         as_of=(snapshot_date.isoformat() if snapshot_date else date.today().isoformat()),
         sample_size=sample_size,
@@ -53,6 +71,9 @@ def trend_github_topics(
             else "github_repo_snapshot 테이블이 비어있음 — scripts/ingest_github_snapshots.py 실행 필요"
         ),
     )
+    if cache_key is not None:
+        set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/trend/github-chronicle", response_model=GithubChronicleResponse)
@@ -61,8 +82,13 @@ def trend_github_chronicle(
     limit_techs: Annotated[int, Query(ge=1, le=30)] = 15,
 ) -> GithubChronicleResponse:
     """기술별 대표 레포의 연도별 스타 순위 변천사."""
+    cache_key = make_reference_cache_key("trend_github_chronicle", {"limit_techs": limit_techs})
+    cached = get_cached(cache_key, GithubChronicleResponse)
+    if cached is not None:
+        return cached
+
     lines, years, snapshot_date, sample_size = get_github_chronicle(session=session, limit_techs=limit_techs)
-    return GithubChronicleResponse(
+    response = GithubChronicleResponse(
         years=years,
         lines=lines,
         as_of=(snapshot_date.isoformat() if snapshot_date else date.today().isoformat()),
@@ -73,3 +99,5 @@ def trend_github_chronicle(
             else "github_repo_snapshot/github_star_history 테이블이 비어있음 — scripts/ingest_github_snapshots.py 실행 필요"
         ),
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
