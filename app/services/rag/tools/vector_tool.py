@@ -34,25 +34,47 @@ def semantic_search(
         return None
 
     qv = "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+    # 코퍼스에는 (title, company)가 완전히 같은 중복 공고 그룹이 약 14,058개 있다.
+    # LIMIT을 그대로 걸면 top-k가 같은 공고 4~6개로 채워지는 일이 흔하다(실측: "오케스트로
+    # Back-end Developer"가 4번 연속 노출). SQL에서 DISTINCT ON (title, company)로 정리하고
+    # 싶지만, 그러면 ORDER BY를 title/company 기준으로 바꿔야 해서 ix_posting_embedding_hnsw_tech
+    # 인덱스(ORDER BY embedding <=> qv 전제)를 못 타고 122K행 seq scan으로 떨어진다. 그래서
+    # 인덱스는 그대로 거리순으로 태우되, 여유분을 더 뽑아(fetch_limit) 파이썬에서 (title,
+    # company) 중복을 걸러내는 방식으로 우회한다.
+    fetch_limit = min(limit * 5, 40)
     sql = (
         f"SELECT p.id, p.title, p.company, p.pool, "
         f"(e.embedding <=> CAST(:qv AS vector)) AS dist "
         f"FROM posting_embedding e "
         f"JOIN posting p ON p.id = e.id "
         f"WHERE {_POOL_WHERE} "
-        f"ORDER BY e.embedding <=> CAST(:qv AS vector) LIMIT :limit"
+        f"ORDER BY e.embedding <=> CAST(:qv AS vector) LIMIT :fetch_limit"
     )
     sql_start = time.perf_counter()
     rows = session.execute(
         text(sql),
-        {"qv": qv, "pool": norm_pool(pool), "limit": limit},
+        {"qv": qv, "pool": norm_pool(pool), "fetch_limit": fetch_limit},
     ).all()
     sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     if not rows:
         return None
 
-    items = []
+    # 거리(가까운 순)로 이미 정렬된 rows를 그대로 순회하며 (title, company) 조합이
+    # 처음 나온 행만 채택한다. 대소문자/앞뒤 공백만 다른 경우도 같은 공고로 취급하고,
+    # 가장 가까운(=가장 먼저 나온) 쪽을 남긴다. limit개를 채우면 즉시 중단한다.
+    seen: set[tuple[str, str]] = set()
+    deduped = []
     for r in rows:
+        key = (r.title.strip().lower(), (r.company or "").strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+        if len(deduped) >= limit:
+            break
+
+    items = []
+    for r in deduped:
         sim = round((1.0 - float(r.dist)) * 100, 1)
         label = r.title if not r.company else f"{r.title} ({r.company})"
         items.append({"name": label, "metric": f"{sim}% 유사", "pct": sim})
@@ -64,7 +86,7 @@ def semantic_search(
             "embedding_dim": len(vec),
             "embedding_preview": [round(float(x), 6) for x in vec[:8]],
             "distance_metric": "cosine (pgvector <=>)",
-            "raw_cosine_distances": [round(float(r.dist), 6) for r in rows[:5]],
+            "raw_cosine_distances": [round(float(r.dist), 6) for r in deduped[:5]],
             "sql": sql,
             "sql_ms": sql_ms,
         }
@@ -75,6 +97,6 @@ def semantic_search(
         "tool": "vector",
         "tool_result": {"kind": "list", "label": "의미 유사 공고", "items": items, "debug": debug},
         "citation": {"type": "vector", "ref": "채용공고 의미벡터", "label": "BGE-M3 코사인 top-k"},
-        "n": len(rows),
+        "n": len(deduped),
         "facts": f"질문과 의미가 가까운 공고(코사인 유사도순) — {facts}",
     }
