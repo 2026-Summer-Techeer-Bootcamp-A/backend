@@ -32,6 +32,22 @@ def get_resume_skill_ids(session: Session, *, resume_id: int, user_id: int) -> s
     return set(rows)
 
 
+def get_resume_career_max(session: Session, *, resume_id: int, user_id: int) -> int | None:
+    """이력서의 career_max(현재까지 경력 연차 상한)를 조회한다. min_match 필터에서
+    공고의 career_min(요구 경력 하한)과 비교해 경력 미달 공고를 걸러내는 데 쓰인다."""
+    resume = session.execute(
+        select(Resume.career_max).where(
+            Resume.resume_id == resume_id,
+            Resume.user_id == user_id,
+            Resume.is_deleted.is_(False),
+        )
+    ).first()
+    if resume is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="resume not found")
+
+    return resume[0]
+
+
 def list_posting_cards(
     session: Session,
     *,
@@ -56,6 +72,11 @@ def list_posting_cards(
         if resume_id is not None and user_id is not None
         else None
     )
+    candidate_career_max = (
+        get_resume_career_max(session, resume_id=resume_id, user_id=user_id)
+        if resume_id is not None and user_id is not None
+        else None
+    )
 
     total = _count_filtered_postings(
         session=session,
@@ -70,6 +91,7 @@ def list_posting_cards(
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
+        candidate_career_max=candidate_career_max,
     )
     postings = _get_filtered_postings(
         session=session,
@@ -85,6 +107,7 @@ def list_posting_cards(
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
+        candidate_career_max=candidate_career_max,
         limit=page_size,
         offset=(page - 1) * page_size,
     )
@@ -170,6 +193,7 @@ def _apply_posting_filters(
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
+    candidate_career_max: int | None = None,
 ):
     """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
     실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
@@ -239,6 +263,13 @@ def _apply_posting_filters(
                 else_=0.0,
             )
             stmt = stmt.where(match_pct >= min_match)
+            # "지원 가능"(min_match) 판정에는 경력요건도 반영한다: 이력서의 career_max가
+            # 공고의 career_min보다 낮으면 기술 스택이 겹쳐도 지원 가능으로 보지 않는다.
+            # 둘 중 하나라도 정보가 없으면(경력무관 공고, 경력 미기재 이력서) 걸러내지 않는다.
+            if candidate_career_max is not None:
+                stmt = stmt.where(
+                    Posting.career_min.is_(None) | (Posting.career_min <= candidate_career_max)
+                )
 
     return stmt
 
@@ -285,6 +316,7 @@ def _count_filtered_postings(
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
+    candidate_career_max: int | None = None,
 ) -> int:
     # id는 posting의 기본키(_apply_posting_filters는 JOIN 없이 FROM posting만 사용)라
     # 이미 유일함. DISTINCT는 postgres가 dedup을 위해 매칭 행 전체를 정렬하게 만들어
@@ -302,6 +334,7 @@ def _count_filtered_postings(
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
+        candidate_career_max=candidate_career_max,
     )
     return session.execute(stmt).scalar_one()
 
@@ -323,6 +356,7 @@ def _get_filtered_postings(
     match_only: bool = False,
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
+    candidate_career_max: int | None = None,
 ) -> list[Posting]:
     stmt = _apply_posting_filters(
         select(Posting),
@@ -337,6 +371,7 @@ def _get_filtered_postings(
         match_only=match_only,
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
+        candidate_career_max=candidate_career_max,
     )
 
     if sort == "match" and owned_skill_ids is not None:
