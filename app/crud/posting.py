@@ -628,10 +628,13 @@ def get_similar_postings(session: Session, *, posting_id: int, limit: int = 10) 
     # skill_id가 중복되지 않는다. DISTINCT 없이도 결과는 같고 정렬 비용만 없앤다.
     overlap_rows = session.execute(
         select(PostingTech.posting_id, func.count(PostingTech.skill_id).label("overlap"))
+        .join(Posting, Posting.id == PostingTech.posting_id)
         .where(
             PostingTech.skill_id.in_(skill_ids),
             PostingTech.posting_id != posting_id,
             PostingTech.is_deleted.is_(False),
+            Posting.is_deleted.is_(False),
+            Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
         )
         .group_by(PostingTech.posting_id)
         .order_by(func.count(PostingTech.skill_id).desc())
