@@ -8,6 +8,7 @@ yield하면서, 동시에 collect 딕셔너리에 조립용 원본 객체(Plan/S
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -55,35 +56,43 @@ def _dispatch(session: Session, p: Plan, verbose: bool = False) -> tuple[list[di
     pool = p.pool
     out: list[dict] = []
 
+    def _run(fn: Any, *args: Any, **kwargs: Any) -> dict | None:
+        """도구 함수 실행 시간을 재서 반환된 dict에 duration_ms로 얹는다(verbose 로그용)."""
+        start = time.perf_counter()
+        result = fn(*args, **kwargs)
+        if result is not None:
+            result["duration_ms"] = round((time.perf_counter() - start) * 1000, 1)
+        return result
+
     if p.intent == "cooccurrence" and skill:
-        r = graph_tool.co_occurring_skills(session, skill, pool, verbose=verbose)
+        r = _run(graph_tool.co_occurring_skills, session, skill, pool, verbose=verbose)
         if r:
             out.append(r)
     elif p.intent == "semantic_search":
-        r = vector_tool.semantic_search(session, p.subqueries[0] if p.subqueries else "", pool, verbose=verbose)
+        r = _run(vector_tool.semantic_search, session, p.subqueries[0] if p.subqueries else "", pool, verbose=verbose)
         if r:
             out.append(r)
     elif p.intent == "skill_demand" and skill:
-        r = sql_tool.skill_demand(session, skill, pool, category=category, entry_level=entry_level, verbose=verbose)
+        r = _run(sql_tool.skill_demand, session, skill, pool, category=category, entry_level=entry_level, verbose=verbose)
         if r:
             out.append(r)
     elif p.intent == "compare":
         skills_list = p.entities.get("skills") or []
         if skills_list:
-            r = sql_tool.multi_skill_compare(session, list(skills_list), pool, category=category, entry_level=entry_level, verbose=verbose)
+            r = _run(sql_tool.multi_skill_compare, session, list(skills_list), pool, category=category, entry_level=entry_level, verbose=verbose)
             if r:
                 out.append(r)
     elif p.intent == "concept_ranking":
-        out.append(sql_tool.top_concepts(session, pool, verbose=verbose))
+        out.append(_run(sql_tool.top_concepts, session, pool, verbose=verbose))
     elif p.intent == "cert_ranking":
-        out.append(sql_tool.top_certs(session, pool, category=category, entry_level=entry_level, verbose=verbose))
+        out.append(_run(sql_tool.top_certs, session, pool, category=category, entry_level=entry_level, verbose=verbose))
     elif p.intent == "region_distribution":
-        out.append(sql_tool.top_locations(session, pool, verbose=verbose))
+        out.append(_run(sql_tool.top_locations, session, pool, verbose=verbose))
 
     used_fallback_branch = not out
     if used_fallback_branch:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
         out.append(
-            sql_tool.top_skills(session, pool, category=category, entry_level=entry_level, verbose=verbose)
+            _run(sql_tool.top_skills, session, pool, category=category, entry_level=entry_level, verbose=verbose)
         )
     fell_back = used_fallback_branch and not category and not entry_level
 
@@ -94,7 +103,7 @@ def _dispatch(session: Session, p: Plan, verbose: bool = False) -> tuple[list[di
         primary_items = out[0]["tool_result"].get("items") or []
         if primary_items:
             insight_skill = primary_items[0]["name"]
-            insight = graph_tool.co_occurring_skills(session, insight_skill, pool, verbose=verbose)
+            insight = _run(graph_tool.co_occurring_skills, session, insight_skill, pool, verbose=verbose)
             if insight:
                 out.append(insight)
 
@@ -119,8 +128,17 @@ def run_chat_events(
     collect["steps"] = []
 
     try:
+        pipeline_start = time.perf_counter()
         llm = get_llm()
+
+        plan_start = time.perf_counter()
+        calls_before = llm.call_count
         p, plan_degraded = make_plan(session, llm, question, pool)
+        plan_ms = round((time.perf_counter() - plan_start) * 1000, 1)
+        # last_debug만 보면 이전 단계 값이 남은 건지 이번 단계에서 채워진 건지 구분이 안 되므로,
+        # call_count가 실제로 늘었을 때만(=이 단계에서 LLM이 호출됐을 때만) 갖다 붙인다.
+        plan_llm_debug = llm.last_debug if llm.call_count > calls_before else None
+
         route = p.tools[0] if p.tools else "sql"
         collect["plan"] = p
         collect["route"] = route
@@ -137,6 +155,8 @@ def run_chat_events(
             )
             + (" · 신입" if p.entities.get("entry_level") else "")
             + (" · (휴리스틱 폴백)" if plan_degraded else ""),
+            duration_ms=plan_ms,
+            debug=plan_llm_debug,
         )
         collect["steps"].append(plan_step)
         yield {
@@ -149,6 +169,8 @@ def run_chat_events(
                 "pool": p.pool,
                 "entities": p.entities,
             },
+            "duration_ms": plan_ms,
+            "debug": plan_llm_debug,
         }
 
         tool_outputs, fell_back = _dispatch(session, p, verbose=verbose)
@@ -169,12 +191,16 @@ def run_chat_events(
         if fell_back:
             plan_step.detail = (plan_step.detail or "") + " · (대상 미해소, 일반 랭킹으로 대체)"
         for o in tool_outputs:
+            # facts는 tool_output 최상위(o["facts"])에만 있고 tool_result 안에는 없다 — synthesize()에
+            # 실제로 먹인 근거 문장을 verbose 로그에서 볼 수 있게 여기서 한 번만 합쳐 넣는다.
+            o["tool_result"]["facts"] = o.get("facts")
             tr = o["tool_result"]
             step = Step(
                 kind="tool",
                 tool=o.get("tool", p.tools[0]),
                 label=tr["label"],
                 detail=o["citation"]["label"],
+                duration_ms=o.get("duration_ms"),
             )
             collect["steps"].append(step)
             yield {
@@ -183,19 +209,34 @@ def run_chat_events(
                 "tool": step.tool,
                 "label": step.label,
                 "detail": step.detail,
+                "duration_ms": step.duration_ms,
             }
             yield {"type": "result", "result": tr}
 
+        eval_start = time.perf_counter()
         passed, eval_detail = evaluate(tool_outputs)
-        eval_step = Step(kind="eval", label="근거 충분성 검증", detail=eval_detail)
+        eval_ms = round((time.perf_counter() - eval_start) * 1000, 1)
+        eval_step = Step(kind="eval", label="근거 충분성 검증", detail=eval_detail, duration_ms=eval_ms)
         collect["steps"].append(eval_step)
-        yield {"type": "step", "kind": "eval", "label": eval_step.label, "detail": eval_step.detail}
+        yield {
+            "type": "step",
+            "kind": "eval",
+            "label": eval_step.label,
+            "detail": eval_step.detail,
+            "duration_ms": eval_ms,
+        }
 
+        synth_start = time.perf_counter()
+        calls_before = llm.call_count
         answer, synth_degraded, answered = synthesize(llm, question, tool_outputs, passed)
+        synth_ms = round((time.perf_counter() - synth_start) * 1000, 1)
+        synth_llm_debug = llm.last_debug if llm.call_count > calls_before else None
         synth_step = Step(
             kind="synth",
             label="답변 합성",
             detail="LLM 폴백(템플릿)" if synth_degraded else "LLM 합성",
+            duration_ms=synth_ms,
+            debug=synth_llm_debug,
         )
         collect["steps"].append(synth_step)
         yield {
@@ -203,6 +244,8 @@ def run_chat_events(
             "kind": "synth",
             "label": synth_step.label,
             "detail": synth_step.detail,
+            "duration_ms": synth_ms,
+            "debug": synth_llm_debug,
         }
 
         n = max((o.get("n", 0) for o in tool_outputs), default=0)
@@ -213,7 +256,23 @@ def run_chat_events(
         # 질문과 무관한 답이므로 신뢰도를 상한 2로 깎는다.
         if fell_back and answered:
             confidence_level = min(confidence_level, 2)
-        degraded = plan_degraded or synth_degraded or not passed or not answered or fell_back
+
+        # degraded 하나로 뭉뚱그리지 않고, 정확히 어떤 판정 때문인지 사유별로 분해한다 —
+        # "근거가 얕아요" 한 줄로는 사용자가 정말 원인이 뭔지(라우팅 실패인지, 근거 부족인지,
+        # LLM 합성 실패인지) 구분할 수 없었다. bool(degraded_reasons)는 기존 degraded 공식과
+        # 정확히 동치라 판정 로직 자체는 바뀌지 않는다.
+        degraded_reasons: list[str] = []
+        if plan_degraded:
+            degraded_reasons.append("의도 분류가 실패해 휴리스틱 규칙으로 대체됐어요")
+        if fell_back:
+            degraded_reasons.append("질문이 겨냥한 대상을 찾지 못해 일반 기술 랭킹으로 대체됐어요")
+        if not passed:
+            degraded_reasons.append("근거 표본이 부족해 검증을 통과하지 못했어요")
+        if not answered:
+            degraded_reasons.append("근거 자체가 없어 답변을 만들지 못했어요")
+        if synth_degraded:
+            degraded_reasons.append("LLM 합성 대신 사실을 그대로 이어붙인 답으로 대체됐어요")
+        degraded = bool(degraded_reasons)
 
         citations = [Citation(**o["citation"]) for o in tool_outputs]
         tool_results = [ToolResult(**o["tool_result"]) for o in tool_outputs]
@@ -223,6 +282,10 @@ def run_chat_events(
         collect["tool_results"] = tool_results
         collect["confidence"] = Confidence(level=confidence_level, n=n)
         collect["degraded"] = degraded
+        collect["degraded_reasons"] = degraded_reasons
+
+        total_ms = round((time.perf_counter() - pipeline_start) * 1000, 1)
+        collect["total_duration_ms"] = total_ms
 
         yield {
             "type": "final",
@@ -230,6 +293,8 @@ def run_chat_events(
             "citations": [c.model_dump() for c in citations],
             "confidence": {"level": confidence_level, "n": n},
             "degraded": degraded,
+            "degraded_reasons": degraded_reasons,
+            "total_duration_ms": total_ms,
         }
     except Exception as exc:  # noqa: BLE001 — SSE 계약: 실패는 error 이벤트로 알린다
         collect["exception"] = exc
@@ -253,4 +318,6 @@ def run_chat(session: Session, question: str, pool: str | None = None, *, verbos
         citations=collect["citations"],
         confidence=collect["confidence"],
         degraded=collect["degraded"],
+        degraded_reasons=collect["degraded_reasons"],
+        total_duration_ms=collect["total_duration_ms"],
     )
