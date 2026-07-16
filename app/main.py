@@ -1,4 +1,5 @@
 import anyio.to_thread
+import logging
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -12,7 +13,7 @@ from sqlalchemy import event, inspect, text
 
 import app.models  # noqa: F401
 from app.core.config import settings
-from app.core.db import MAX_OVERFLOW, POOL_SIZE, engine
+from app.core.db import MAX_OVERFLOW, POOL_SIZE, SessionLocal, engine
 from app.core.db import Base
 from app.routers.auth import router as auth_router
 from app.routers.cert import router as cert_router
@@ -23,7 +24,7 @@ from app.routers.match import router as match_router
 from app.routers.posting import router as posting_router
 from app.routers.posting_map import router as posting_map_router
 from app.routers.company import router as company_router
-from app.routers.insight import router as insight_router
+from app.routers.insight import router as insight_router, warm_concept_tech_cache
 from app.routers.github_insight import router as github_insight_router
 from app.routers.admin import router as admin_router
 from app.routers.search import router as search_router
@@ -31,6 +32,17 @@ from app.routers.chat import router as chat_router
 from app.routers.news import router as news_router
 from app.routers.feed import router as feed_router
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
+
+
+def _warm_dashboard_caches() -> None:
+    try:
+        with SessionLocal() as session:
+            warm_concept_tech_cache(session)
+    except Exception:
+        # Cache warming is an optimization and must never prevent startup.
+        logger.exception("Failed to warm concept-tech cache")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -434,6 +446,8 @@ async def lifespan(app: FastAPI):
 
     lock_conn.execute(text("SELECT pg_advisory_unlock(727123)"))
     lock_conn.close()
+
+    await anyio.to_thread.run_sync(_warm_dashboard_caches)
 
     yield
 
