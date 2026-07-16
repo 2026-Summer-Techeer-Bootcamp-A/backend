@@ -77,7 +77,19 @@ def semantic_search(
     for r in deduped:
         sim = round((1.0 - float(r.dist)) * 100, 1)
         label = r.title if not r.company else f"{r.title} ({r.company})"
-        items.append({"name": label, "metric": f"{sim}% 유사", "pct": sim})
+        # K3: 실제 공고 목록이라 id/company/pool을 함께 실어 프론트가 클릭 가능한
+        # 공고 카드(상세보기, 북마크)로 렌더링할 수 있게 한다. 유사도(sim)는 기존과
+        # 동일하게 pct/metric에 그대로 둔다.
+        items.append(
+            {
+                "name": label,
+                "metric": f"{sim}% 유사",
+                "pct": sim,
+                "id": r.id,
+                "company": r.company,
+                "pool": r.pool,
+            }
+        )
 
     facts = "; ".join(f"{it['name']} {it['metric']}" for it in items[:5])
     debug = (
@@ -95,7 +107,8 @@ def semantic_search(
     )
     return {
         "tool": "vector",
-        "tool_result": {"kind": "list", "label": "의미 유사 공고", "items": items, "debug": debug},
+        # K3: 실제 공고 목록이라 kind="posting_list"로 표시해 프론트가 카드로 렌더링한다.
+        "tool_result": {"kind": "posting_list", "label": "의미 유사 공고", "items": items, "debug": debug},
         "citation": {"type": "vector", "ref": "채용공고 의미벡터", "label": "BGE-M3 코사인 top-k"},
         "n": len(deduped),
         "facts": f"질문과 의미가 가까운 공고(코사인 유사도순) — {facts}",

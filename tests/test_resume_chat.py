@@ -45,8 +45,15 @@ def session() -> Iterator[Session]:
         s.flush()
 
         # p1: python+react 요구, p2: python만 요구 -> python 보유 시 커버리지 100%, react가 갭.
-        p1 = Posting(source="t", source_uid="1", pool="domestic", title="백엔드", post_date=date(2026, 1, 1))
-        p2 = Posting(source="t", source_uid="2", pool="domestic", title="백엔드2", post_date=date(2026, 1, 2))
+        # region_district는 resume_recommend의 지역 필터 테스트용 — p1은 강남, p2는 부산.
+        p1 = Posting(
+            source="t", source_uid="1", pool="domestic", title="백엔드", company="회사A",
+            post_date=date(2026, 1, 1), region_district="강남구",
+        )
+        p2 = Posting(
+            source="t", source_uid="2", pool="domestic", title="백엔드2", company="회사B",
+            post_date=date(2026, 1, 2), region_district="부산",
+        )
         s.add_all([p1, p2])
         s.flush()
         s.add_all(
@@ -271,3 +278,129 @@ def test_chat_endpoint_without_resume_id_unaffected(client: TestClient) -> None:
         json={"question": "요즘 뭐가 제일 인기야?", "pool": "domestic"},
     )
     assert resp.status_code == 200
+
+
+# --- K3: resume_recommend — router 인텐트 분류 ----------------------------------------
+
+
+def test_heuristic_classifies_resume_recommend(session: Session) -> None:
+    """"넣어볼만한"/"추천" + 이력서 지칭이 결합되면 resume_recommend로 분류돼야 한다 —
+    이전에는 resume_coverage(통계)로 새어나가 구체적인 공고 목록을 못 돌려줬다."""
+    plan = rag_router._heuristic(session, "이 이력서로 넣어볼만한 공고 추천해줘", None)
+    assert plan.intent == "resume_recommend"
+
+
+def test_heuristic_resume_recommend_extracts_region_entity(session: Session) -> None:
+    plan = rag_router._heuristic(
+        session, "이 이력서로 넣어볼만한 공고 추천해줘. 강남에 있는 곳이면 좋겠어", None
+    )
+    assert plan.intent == "resume_recommend"
+    assert plan.entities.get("region") == "강남"
+
+
+def test_heuristic_resume_recommend_without_region_has_no_region_entity(session: Session) -> None:
+    plan = rag_router._heuristic(session, "내 스킬에 맞는 공고 추천해줘", None)
+    assert plan.intent == "resume_recommend"
+    assert "region" not in plan.entities
+
+
+def test_heuristic_still_classifies_resume_coverage_without_recommend_action(
+    session: Session,
+) -> None:
+    """resume_recommend 추가가 기존 resume_coverage 분류를 건드리지 않아야 한다(회귀)."""
+    plan = rag_router._heuristic(session, "내 이력서로 지원 가능한 공고 얼마나 돼?", None)
+    assert plan.intent == "resume_coverage"
+
+
+# --- K3: resume_recommend tool — 스킬 겹침 랭킹 + 지역 필터 -----------------------------
+
+
+def test_resume_recommend_returns_none_without_owned_skills(session: Session) -> None:
+    assert resume_tool.resume_recommend(session, set(), pool="domestic") is None
+    assert resume_tool.resume_recommend(session, None, pool="domestic") is None
+
+
+def test_resume_recommend_ranks_by_skill_overlap(session: Session) -> None:
+    """python+react 둘 다 보유하면 p1(overlap=2)이 p2(overlap=1)보다 먼저 나와야 한다."""
+    owned = {session.info["python_id"], session.info["react_id"]}
+    result = resume_tool.resume_recommend(session, owned, pool="domestic")
+    assert result is not None
+    assert result["tool"] == "resume"
+    assert result["tool_result"]["kind"] == "posting_list"
+    items = result["tool_result"]["items"]
+    assert items[0]["name"] == "백엔드"  # p1: overlap 2건 -> 1위
+    assert items[0]["pct"] == 100.0  # 2/2 * 100
+    assert items[0]["company"] == "회사A"
+    assert items[0]["id"] is not None
+    assert items[1]["name"] == "백엔드2"  # p2: overlap 1건 -> 2위
+    assert items[1]["pct"] == 50.0  # 1/2 * 100
+
+
+def test_resume_recommend_filters_by_region(session: Session) -> None:
+    """강남으로 필터하면 region_district="강남구"인 p1만 나와야 한다(부분 문자열 ILIKE)."""
+    owned = {session.info["python_id"], session.info["react_id"]}
+    result = resume_tool.resume_recommend(session, owned, pool="domestic", region="강남")
+    assert result is not None
+    items = result["tool_result"]["items"]
+    assert len(items) == 1
+    assert items[0]["name"] == "백엔드"
+    assert "강남" in result["facts"]
+
+
+def test_resume_recommend_falls_back_when_region_has_no_match(session: Session) -> None:
+    """일치하는 지역이 없으면 빈 결과 대신 지역 없이 전체를 돌려주고 facts에 남긴다."""
+    owned = {session.info["python_id"], session.info["react_id"]}
+    result = resume_tool.resume_recommend(session, owned, pool="domestic", region="제주")
+    assert result is not None
+    items = result["tool_result"]["items"]
+    assert len(items) == 2  # region 필터 없이 p1, p2 둘 다 돌아온다
+    assert "일치하는 공고가 없어" in result["facts"]
+
+
+# --- K3: pipeline._dispatch/run_chat_events — resume_recommend 라우팅 -------------------
+
+
+def test_dispatch_resume_recommend_uses_resume_tool_and_threads_region(session: Session) -> None:
+    owned = {session.info["python_id"], session.info["react_id"]}
+    plan = Plan(
+        intent="resume_recommend",
+        tools=["resume"],
+        pool="domestic",
+        entities={"region": "강남"},
+        subqueries=["q"],
+    )
+    tool_outputs, fell_back = rag_pipeline._dispatch(session, plan, owned_skill_ids=owned)
+    assert len(tool_outputs) == 1
+    assert tool_outputs[0]["tool"] == "resume"
+    assert tool_outputs[0]["tool_result"]["kind"] == "posting_list"
+    assert fell_back is False
+    items = tool_outputs[0]["tool_result"]["items"]
+    assert len(items) == 1  # 강남 필터로 p1만
+
+
+def test_run_chat_events_early_returns_for_resume_recommend_without_resume(
+    session: Session,
+) -> None:
+    events = list(
+        rag_pipeline.run_chat_events(
+            session, "이 이력서로 넣어볼만한 공고 추천해줘", pool="domestic", owned_skill_ids=None
+        )
+    )
+    kinds = [e["type"] for e in events]
+    assert kinds == ["plan", "final"]
+    final = events[-1]
+    assert "이력서를 먼저 첨부" in final["answer"]
+    assert final["degraded"] is True
+
+
+def test_run_chat_events_answers_resume_recommend_when_resume_attached(session: Session) -> None:
+    owned = {session.info["python_id"], session.info["react_id"]}
+    events = list(
+        rag_pipeline.run_chat_events(
+            session, "이 이력서로 넣어볼만한 공고 추천해줘", pool="domestic", owned_skill_ids=owned
+        )
+    )
+    kinds = [e["type"] for e in events]
+    assert "result" in kinds
+    result_event = next(e for e in events if e["type"] == "result")
+    assert result_event["result"]["kind"] == "posting_list"
