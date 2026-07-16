@@ -43,7 +43,7 @@ services:
   # 수는 DEFAULT_POOL_SIZE만큼만 유지되어 이 경합이 사라진다. app의 DATABASE_URL을
   # Cloud SQL 대신 이 서비스(pgbouncer:6432)로 돌려야 효과가 있다.
   pgbouncer:
-    image: edoburu/pgbouncer:1.24.1-p0
+    image: edoburu/pgbouncer:v1.25.2-p0
     restart: unless-stopped
     environment:
       - DB_HOST=${POSTGRES_HOST}
