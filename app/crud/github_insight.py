@@ -6,7 +6,7 @@
 
 from datetime import date
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import GithubRepoSnapshot, GithubStarHistory, Posting, PostingTech, Skill, SkillAlias
@@ -47,9 +47,11 @@ def _global_skill_share_pct(session: Session, skill_id: int) -> float:
     if total == 0:
         return 0.0
 
+    # skill_id를 하나로 고정했으므로 posting_tech의 (posting_id, skill_id) 유니크
+    # 제약상 posting_id는 중복될 수 없다. DISTINCT 불필요.
     matched = (
         session.scalar(
-            select(func.count(distinct(PostingTech.posting_id)))
+            select(func.count(PostingTech.posting_id))
             .select_from(PostingTech)
             .join(Posting, Posting.id == PostingTech.posting_id)
             .where(
