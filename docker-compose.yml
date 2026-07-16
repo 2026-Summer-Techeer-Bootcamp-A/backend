@@ -120,8 +120,6 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
-      - loki
-      - tempo
     restart: unless-stopped
     logging: *default-logging
     labels:
