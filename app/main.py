@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest, multiprocess
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, generate_latest, multiprocess
 from pydantic import BaseModel, ConfigDict
 import os
 from fastapi.staticfiles import StaticFiles
@@ -11,7 +11,7 @@ from sqlalchemy import inspect, text
 
 import app.models  # noqa: F401
 from app.core.config import settings
-from app.core.db import engine
+from app.core.db import MAX_OVERFLOW, POOL_SIZE, engine
 from app.core.db import Base
 from app.routers.auth import router as auth_router
 from app.routers.cert import router as cert_router
@@ -390,9 +390,20 @@ async def lifespan(app: FastAPI):
             WHERE is_deleted = false;
         """))
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_posting_hot_companies_agg 
-            ON posting (pool, post_date, company) 
+            CREATE INDEX IF NOT EXISTS ix_posting_hot_companies_agg
+            ON posting (pool, post_date, company)
             WHERE is_deleted = false;
+        """))
+
+        # stats/response-rate 전용. response_rate를 채우는 소스가 적어(현재 도메스틱
+        # 풀은 매칭 0건) 결과는 항상 작은데도, 이 컬럼엔 인덱스가 없어 매번 테이블
+        # 전체를 병렬 시퀀셜 스캔(부하테스트 실측: 2개 워커로 약 150ms, 2 vCPU를
+        # 스캔 내내 통째로 점유)하고 있었다. WHERE 조건과 정확히 일치하는 부분
+        # 인덱스로 바꿔 매칭 행이 없거나 적을 때 즉시 끝나게 한다.
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_response_rate_agg
+            ON posting (pool, company)
+            WHERE is_deleted = false AND response_rate IS NOT NULL;
         """))
 
     lock_conn.execute(text("SELECT pg_advisory_unlock(727123)"))
@@ -425,6 +436,26 @@ Instrumentator().instrument(
     app,
     latency_lowr_buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60),
 )
+
+# 이번 부하테스트에서 QueuePool 타임아웃(전체 400건 한도가 아니라 워커별
+# pool_size+max_overflow 40건 한도)이 실제 병목이었는데, 정작 Grafana엔 postgres
+# 쪽 numbackends만 있고 앱이 자기 풀을 얼마나 쓰고 있는지 보여주는 지표가 없었다.
+# checked_out은 워커마다 다른 풀 인스턴스를 갖고 있으니 워커 프로세스 합산
+# (multiprocess_mode="livesum")으로 노출해야 전체 사용량이 나온다. capacity는
+# 워커 수만큼 곱해진 이론상 총 상한이라 마찬가지로 합산한다.
+_db_pool_checked_out = Gauge(
+    "db_pool_checked_out_connections",
+    "SQLAlchemy 커넥션 풀에서 현재 체크아웃된 커넥션 수(전체 워커 합산)",
+    multiprocess_mode="livesum",
+)
+_db_pool_checked_out.set_function(lambda: engine.pool.checkedout())
+
+_db_pool_capacity = Gauge(
+    "db_pool_capacity_connections",
+    "SQLAlchemy 커넥션 풀 최대 용량(pool_size+max_overflow, 전체 워커 합산)",
+    multiprocess_mode="livesum",
+)
+_db_pool_capacity.set_function(lambda: POOL_SIZE + MAX_OVERFLOW)
 
 # --workers > 1이면 uvicorn이 워커마다 별도 프로세스를 띄우고, 각 프로세스는 자기만의
 # 인메모리 레지스트리에 카운터를 쌓는다. Instrumentator().expose(app)가 만드는 기본
