@@ -9,7 +9,11 @@ GPU가 없으므로 CPU로 추론한다. 모델 로딩은 RAM 2~3GB를 쓰므로
 
 from __future__ import annotations
 
+import logging
+
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _model = None
 _load_failed = False
@@ -25,6 +29,10 @@ def _load():
 
         _model = SentenceTransformer(settings.embedding_model, device="cpu")
     except Exception:
+        # 폴백(벡터 검색 비활성화 후 sql/graph로 대체) 자체는 의도된 동작이므로 유지한다.
+        # 다만 이 예외를 통째로 삼키면(예: /models 볼륨 권한 문제로 모델 다운로드가 매번
+        # 실패) 벡터 검색이 프로덕션에서 단 한 번도 성공하지 못해도 아무 흔적이 안 남는다.
+        logger.warning("BGE-M3 임베딩 모델 로딩 실패, 벡터 검색을 비활성화하고 폴백합니다", exc_info=True)
         _load_failed = True
         _model = None
     return _model
@@ -40,6 +48,7 @@ def embed_query(query: str) -> list[float] | None:
     try:
         vec = model.encode([query], normalize_embeddings=True)[0]
     except Exception:
+        logger.warning("쿼리 임베딩 인코딩 실패, 벡터 검색을 건너뛰고 폴백합니다", exc_info=True)
         return None
     values = [float(x) for x in vec]
     if len(values) != settings.embedding_dim:
