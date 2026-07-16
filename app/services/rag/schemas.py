@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     pool: Literal["domestic", "global"] | None = None
+    verbose: bool = False
 
 
 class Plan(BaseModel):
@@ -44,6 +45,7 @@ class ToolResult(BaseModel):
     unit: str | None = None
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
+    debug: dict[str, Any] | None = None
 
 
 class Citation(BaseModel):
