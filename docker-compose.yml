@@ -1,11 +1,14 @@
 x-logging: &default-logging
-  # 컨테이너 로그가 무한정 쌓이는 걸 막는다. 이게 없으면 디스크가 차거나,
-  # loki.source.docker가 첫 수집 시 쌓인 과거 로그를 한꺼번에 밀어넣어
-  # Loki의 수신 한도를 넘기기 쉽다.
-  driver: json-file
+  # 예전엔 Loki+Alloy를 self-host해서 로그를 모았는데, 이 두 컨테이너가
+  # app-vm의 4 vCPU를 uvicorn과 나눠 쓰면서 부하테스트 중 앱 자체의 처리
+  # 용량을 깎아먹고 있었다(300VU에서 DB를 안 건드리는 /healthz까지 11초씩
+  # 걸린 원인). VM의 서비스 계정에 이미 logging.write 권한이 있어, Docker의
+  # gcplogs 드라이버로 각 컨테이너 로그를 Cloud Logging에 직접 보내도록
+  # 바꿨다. Loki/Alloy 컨테이너 자체가 통째로 필요 없어졌다.
+  driver: gcplogs
   options:
-    max-size: "10m"
-    max-file: "3"
+    gcp-log-cmd: "true"
+    labels: "com.docker.compose.service"
 
 services:
   app:
@@ -95,38 +98,6 @@ services:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
-    restart: unless-stopped
-    logging: *default-logging
-
-  loki:
-    image: grafana/loki:3.4.1
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
-    restart: unless-stopped
-    logging: *default-logging
-
-  alloy:
-    image: grafana/alloy:v1.7.1
-    command: run /etc/alloy/config.alloy
-    volumes:
-      - ./observability/config.alloy:/etc/alloy/config.alloy
-      - /var/log:/var/log:ro
-      # 컨테이너 로그(app, db 등) 수집을 위해 도커 소켓을 읽기 전용으로 마운트.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: unless-stopped
-    logging: *default-logging
-
-  tempo:
-    image: grafana/tempo:2.7.1
-    command: -config.file=/etc/tempo/tempo.yaml
-    volumes:
-      - ./observability/tempo.yaml:/etc/tempo/tempo.yaml
-    ports:
-      - "3200:3200"
-      - "4317:4317"
     restart: unless-stopped
     logging: *default-logging
 
