@@ -4,10 +4,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
+from app.core.config import settings
 from app.core.deps import SessionDep
 from app.crud.posting_map import get_clusters, get_heatmap, get_map_pins
 from app.routers.match import resolve_optional_owned_skill_ids
 from app.schemas.posting_map import HeatmapEntry, MapCluster, MapPin, PostingsMapResponse
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 router = APIRouter()
 
@@ -56,13 +58,25 @@ def postings_map(
     parsed_bbox = _parse_bbox(bbox) if bbox else None
     owned_skill_ids = resolve_optional_owned_skill_ids(session, resume_id, session_id, authorization)
 
+    # 매칭률(resume_id/session_id 기반)이 섞이면 사용자마다 응답이 달라지므로,
+    # 개인화 없는 익명 요청만 캐시한다. 지도 조회 트래픽 대부분이 이 경로다.
+    cache_key = None
+    if owned_skill_ids is None:
+        cache_key = make_reference_cache_key("postings_map", {"region": region, "bbox": bbox, "pool": pool})
+        cached = get_cached(cache_key, PostingsMapResponse)
+        if cached is not None:
+            return cached
+
     pins, as_of = get_map_pins(session=session, region=region, bbox=parsed_bbox, owned_skill_ids=owned_skill_ids)
     heatmap = get_heatmap(session=session, region=region, bbox=parsed_bbox)
     clusters = get_clusters(session=session, region=region, bbox=parsed_bbox, owned_skill_ids=owned_skill_ids)
 
-    return PostingsMapResponse(
+    response = PostingsMapResponse(
         pins=[MapPin(**pin) for pin in pins],
         heatmap=[HeatmapEntry(**entry) for entry in heatmap],
         clusters=[MapCluster(**entry) for entry in clusters],
         as_of=as_of.isoformat(),
     )
+    if cache_key is not None:
+        set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
