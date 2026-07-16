@@ -18,7 +18,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -61,6 +61,29 @@ def session() -> Iterator[Session]:
         s.info["react_id"] = react.id
         yield s
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _patch_skill_detection(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """router._detect_skill/_detect_skills_multi는 raw SQL ILIKE(Postgres 전용)를 쓴다.
+
+    이 테스트들은 sqlite 픽스처로 돌아 ILIKE에서 문법 에러가 났다. 시드된 skill 목록을
+    파이썬 부분 문자열 매칭으로 원래 SQL과 같게 흉내 내는 스텁으로 갈아끼워, 이 파일이
+    검증하려는 인텐트 분류와 파이프라인 흐름만 DB 종류와 무관하게 결정론적으로 확인한다."""
+    canonicals = [c for (c,) in session.execute(select(Skill.canonical)).all()]
+
+    def fake_detect(_s: Session, q: str) -> str | None:
+        low = q.lower()
+        cands = [c for c in canonicals if len(c) >= 2 and c.lower() in low]
+        return max(cands, key=len) if cands else None
+
+    def fake_detect_multi(_s: Session, q: str) -> list[str]:
+        low = q.lower()
+        cands = [c for c in canonicals if len(c) >= 2 and c.lower() in low]
+        return sorted(set(cands), key=len, reverse=True)[:5]
+
+    monkeypatch.setattr(rag_router, "_detect_skill", fake_detect)
+    monkeypatch.setattr(rag_router, "_detect_skills_multi", fake_detect_multi)
 
 
 # --- resume_tool 단위 테스트 ---------------------------------------------------
@@ -109,25 +132,23 @@ def test_resume_coverage_reports_score_and_matched_postings(session: Session) ->
 # --- router 휴리스틱: resume 인텐트 분류 + "얼마나" 오탐 회귀 테스트 -----------------
 
 
-@pytest.mark.integration
 def test_heuristic_classifies_resume_gap(session: Session) -> None:
     plan = rag_router._heuristic(session, "내 이력서 기준 부족한 스킬 뭐야?", None)
     assert plan.intent == "resume_gap"
 
 
-@pytest.mark.integration
 def test_heuristic_classifies_resume_coverage(session: Session) -> None:
     plan = rag_router._heuristic(session, "내 이력서로 지원 가능한 공고 얼마나 돼?", None)
     assert plan.intent == "resume_coverage"
 
 
-@pytest.mark.integration
-def test_heuristic_ambiguous_resume_reference_defaults_to_coverage(session: Session) -> None:
+def test_heuristic_ambiguous_resume_reference_defaults_to_market(session: Session) -> None:
+    # "내 이력서 어때?"처럼 본인 이력서를 두루뭉술하게 묻는 질문은 부족 스킬만도,
+    # 커버리지만도 아닌 종합 분석에 가까우므로 resume_market(레이더+갭+커버리지)으로 답한다.
     plan = rag_router._heuristic(session, "내 이력서 어때?", None)
-    assert plan.intent == "resume_coverage"
+    assert plan.intent == "resume_market"
 
 
-@pytest.mark.integration
 def test_heuristic_does_not_misfire_on_generic_question_with_common_word(session: Session) -> None:
     """"얼마나"는 매우 흔한 단어라 "내 이력서" 같은 본인 지칭 없이 단독으로 오면
     resume_coverage로 오분류되면 안 된다(일반 skill_demand 질문으로 남아야 한다)."""
@@ -158,7 +179,6 @@ def test_dispatch_resume_gap_uses_resume_tool(session: Session) -> None:
 # --- pipeline.run_chat_events: 이력서 미첨부 조기 안내 -------------------------------
 
 
-@pytest.mark.integration
 def test_run_chat_events_early_returns_when_resume_missing(session: Session) -> None:
     events = list(
         rag_pipeline.run_chat_events(
@@ -173,7 +193,6 @@ def test_run_chat_events_early_returns_when_resume_missing(session: Session) -> 
     assert final["degraded"] is True
 
 
-@pytest.mark.integration
 def test_run_chat_events_answers_when_resume_attached(session: Session) -> None:
     owned = {session.info["python_id"]}
     events = list(
@@ -188,7 +207,6 @@ def test_run_chat_events_answers_when_resume_attached(session: Session) -> None:
     assert "이력서를 먼저 첨부" not in final["answer"]
 
 
-@pytest.mark.integration
 def test_run_chat_events_non_resume_question_ignores_owned_skill_ids(session: Session) -> None:
     """일반 질문 경로는 owned_skill_ids를 완전히 무시해야 한다(byte-for-byte 동일 동작)."""
     without = list(rag_pipeline.run_chat_events(session, "요즘 뭐가 제일 인기야?", pool="domestic"))
@@ -234,7 +252,6 @@ def test_chat_endpoint_with_resume_id_requires_auth(client: TestClient) -> None:
     assert resp.status_code == 401
 
 
-@pytest.mark.integration
 def test_chat_endpoint_with_resume_id_and_auth_answers_resume_grounded(client: TestClient) -> None:
     resp = client.post(
         "/api/v1/chat",
@@ -247,7 +264,6 @@ def test_chat_endpoint_with_resume_id_and_auth_answers_resume_grounded(client: T
     assert body["route"] == "resume"
 
 
-@pytest.mark.integration
 def test_chat_endpoint_without_resume_id_unaffected(client: TestClient) -> None:
     """resume_id를 아예 안 보내는 기존 호출 경로는 그대로 동작해야 한다."""
     resp = client.post(
