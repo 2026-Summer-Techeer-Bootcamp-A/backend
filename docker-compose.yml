@@ -16,14 +16,14 @@ services:
   app:
     build: .
     image: ${APP_IMAGE:-career-backend:local}
-    # uvicorn 워커는 (2*cores)+1 공식(동기 워커용)이 아니라 vCPU 수에 맞춘다 — 워커
-    # 하나가 이미 비동기 이벤트 루프라 I/O 바운드 요청은 워커 하나로도 동시 처리가
-    # 되고, 워커를 늘리는 건 CPU 코어를 나눠 쓰기 위함이다. 이 VM은 4 vCPU를 uvicorn
-    # 뿐 아니라 Traefik/Prometheus/Loki/Tempo/Grafana/Alloy와도 나눠 쓰므로 9는
-    # 과할당이었다(부하 테스트 중 CPU 오버섭스크립션으로 확인됨). 워커 수가 줄면
-    # 워커당 pool_size=30인 SQLAlchemy 커넥션 풀의 최대 총량(workers*40)도 같이
-    # 줄어 2 vCPU짜리 DB(db-custom-2-7680) 부담도 낮아진다.
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+    # uvicorn 워커 수는 vCPU 수에 맞추되, 이 워커들이 동기 def 엔드포인트를 스레드풀에서
+    # 돌리며 DB I/O를 기다리는 시간이 많아 코어를 다 채우지 못한다. 부하테스트에서 워커 4개
+    # 시 500VU 구간 VM CPU가 27% 유휴로 남는 것을 실측했다. 4 vCPU를 관측 스택과도 나눠
+    # 쓰지만 그쪽은 부하 중 스크레이프가 주기적이라 순간 점유가 낮고, RAM도 73% 여유라
+    # 워커를 8개로 늘려 노는 코어를 채운다. 워커를 늘리면 SQLAlchemy 풀 총량(workers*40)도
+    # 커지지만, pgbouncer가 트랜잭션 풀링으로 실제 Postgres 백엔드를 DEFAULT_POOL_SIZE(20)로
+    # 묶으므로 예전처럼 2 vCPU DB에 백엔드가 몰리는 경합은 재발하지 않는다.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8"]
     env_file:
       - .env
     restart: unless-stopped
