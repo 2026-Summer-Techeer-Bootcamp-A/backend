@@ -1,6 +1,7 @@
 import anyio.to_thread
 import logging
 from fastapi import FastAPI, Response
+from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, generate_latest, multiprocess
@@ -481,7 +482,15 @@ async def lifespan(app: FastAPI):
 
     yield
 
-app = FastAPI(title=settings.otel_service_name, lifespan=lifespan)
+# 응답 직렬화를 orjson으로 바꾼다. 부하테스트에서 1200VU 구간 서버가 CPU 포화(앱 3코어,
+# VM 0퍼센트 유휴)로 약 285 req/s에서 천장에 닿는 것을 실측했는데, 이 병목이 순수 CPU라
+# 요청당 직렬화 비용을 줄이면 그만큼 천장이 올라간다. 공고 목록처럼 필드가 많은 JSON 응답이
+# 대부분이라 기본 json 대비 orjson의 직렬화 이득이 크다.
+app = FastAPI(
+    title=settings.otel_service_name,
+    lifespan=lifespan,
+    default_response_class=ORJSONResponse,
+)
 
 # 프론트(Vercel) <-> 백엔드(GCP) 간 cross-origin 요청 허용.
 # Bearer 토큰 인증이라 쿠키가 없으므로 allow_credentials는 False로 충분하다.
