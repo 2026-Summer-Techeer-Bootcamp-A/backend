@@ -373,21 +373,21 @@ async def lifespan(app: FastAPI):
             WHERE is_deleted = false;
         """))
 
-        # /api/v1/postings 목록 쿼리 전용. 부하테스트(300VU)에서 이 쿼리가 공고 565,191행을
-        # Parallel Seq Scan으로 통째로 훑고 있었다(실측 205.6ms, buffers 51,365) — 위
-        # ix_posting_list_filter가 close_date를 컬럼에 포함하고 있는데, 실제 쿼리는
-        # "close_date IS NULL OR close_date >= CURRENT_DATE"라는 OR 조건이라 그 인덱스를
-        # 못 탄다. CURRENT_DATE는 IMMUTABLE이 아니라(호출 시점마다 값이 바뀜) 부분 인덱스의
-        # WHERE 조건에도 넣을 수 없다. 그래서 이 인덱스는 close_date를 아예 빼고 pool
-        # 동등조건 + 정렬 컬럼(post_date DESC NULLS LAST, id DESC)만으로 좁힌 뒤, close_date
-        # 조건은 인덱스 스캔 결과에 대한 재검사(filter)로 거른다 — 목록 조회의 기본 정렬
-        # (app/crud/posting.py _get_filtered_postings의 latest 정렬)과 정확히 일치해야
-        # 플래너가 LIMIT/OFFSET과 함께 이 인덱스를 스캔으로 쓴다. 적용 후 프로덕션 실측
-        # 205.6ms/buffers 51,365 -> 3.6ms/buffers 17.
+        # /api/v1/postings 목록 쿼리 전용. _apply_posting_filters가 만드는 조건은
+        # "is_deleted IS false"인데, 이 테이블의 부분 인덱스들(ix_posting_list_filter,
+        # ix_posting_region_district, ix_posting_coordinates 등)은 전부 "WHERE
+        # is_deleted = false" 조건으로 만들어져 있다. is_deleted가 NOT NULL default
+        # false라 두 식은 의미상 같지만, 플래너는 그 술어 함의를 증명하지 못해 이
+        # 부분 인덱스들을 전혀 쓰지 못한다 — 그래서 이 인덱스는 부분 조건을 두지 않고
+        # is_deleted를 선두 컬럼에 두어, 술어가 IS false로 나오든 = false로 나오든
+        # 동등조건으로 매칭되게 한다. 또한 _get_filtered_postings의 ORDER BY는
+        # "(post_date IS NULL), post_date DESC, id DESC" 순으로 정렬하는데(NULLS LAST를
+        # 흉내 낸 관용구), 플래너는 ORDER BY와 인덱스를 구문적으로 맞추므로 이 표현식이
+        # 인덱스 선두에 없으면 정렬에 인덱스를 못 태운다. 적용 후 프로덕션 실측
+        # _get_filtered_postings 332.4ms -> 4.2ms.
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_posting_list_latest
-            ON posting (pool, post_date DESC NULLS LAST, id DESC)
-            WHERE is_deleted = false;
+            CREATE INDEX IF NOT EXISTS ix_posting_list_order
+            ON posting (is_deleted, pool, ((post_date IS NULL)), post_date DESC, id DESC);
         """))
 
         # Coordinates B-Tree composite index
