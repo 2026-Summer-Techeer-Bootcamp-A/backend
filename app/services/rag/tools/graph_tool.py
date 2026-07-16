@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -53,14 +55,17 @@ def co_occurring_skills(
         f"WHERE pt1.skill_id = :sid AND pt1.is_deleted = false AND {_POOL_WHERE} "
         f"GROUP BY s2.canonical, s2.id ORDER BY n DESC LIMIT :limit"
     )
+    sql_1hop_start = time.perf_counter()
     rows = session.execute(
         text(sql_1hop),
         {"sid": skill_id, "pool": pool, "limit": limit},
     ).all()
+    sql_1hop_ms = round((time.perf_counter() - sql_1hop_start) * 1000, 1)
 
     items, edges, nodes = [], [], [{"id": canonical, "root": True, "hop": 0}]
     neighbor_ids: list[int] = []
     sql_cross: str | None = None
+    sql_cross_ms: float | None = None
     neighbor_names: set[str] = set()
 
     for name, skill_id_2, n in rows:
@@ -88,10 +93,12 @@ def co_occurring_skills(
             f"GROUP BY s1.canonical, s2.canonical "
             f"ORDER BY n DESC LIMIT 20"
         )
+        sql_cross_start = time.perf_counter()
         cross_rows = session.execute(
             text(sql_cross),
             {"pool": pool},
         ).all()
+        sql_cross_ms = round((time.perf_counter() - sql_cross_start) * 1000, 1)
 
         for sa, sb, n_cross in cross_rows:
             if sa in neighbor_names and sb in neighbor_names:
@@ -110,7 +117,9 @@ def co_occurring_skills(
             "strength_formula": "strength = (동반 공고 n건 / 대상 기술 기준 공고 base건) x 100",
             "base_postings": base,
             "sql_1hop": sql_1hop,
+            "sql_1hop_ms": sql_1hop_ms,
             "sql_2hop_cross": sql_cross,
+            "sql_2hop_cross_ms": sql_cross_ms,
         }
         if verbose
         else None

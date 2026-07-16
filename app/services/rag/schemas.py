@@ -29,6 +29,8 @@ class Step(BaseModel):
     tool: str | None = None
     label: str
     detail: str | None = None
+    duration_ms: float | None = None
+    debug: dict[str, Any] | None = None  # kind="synth"일 때만 채워짐 — LLM 모델/temperature/토큰/재시도 실측값
 
 
 class ToolResultItem(BaseModel):
@@ -46,6 +48,7 @@ class ToolResult(BaseModel):
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     debug: dict[str, Any] | None = None
+    facts: str | None = None  # synthesize()에 실제로 먹인 근거 문장 — verbose 로그에서 "무엇을 근거로 답했는지" 보여주는 용도
 
 
 class Citation(BaseModel):
@@ -68,3 +71,5 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = []
     confidence: Confidence
     degraded: bool = False
+    degraded_reasons: list[str] = []
+    total_duration_ms: float | None = None

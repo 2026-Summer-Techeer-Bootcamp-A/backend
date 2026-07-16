@@ -7,6 +7,8 @@ None을 반환해 라우터가 sql/graph로 폴백한다.
 
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -40,10 +42,12 @@ def semantic_search(
         f"WHERE {_POOL_WHERE} "
         f"ORDER BY e.embedding <=> CAST(:qv AS vector) LIMIT :limit"
     )
+    sql_start = time.perf_counter()
     rows = session.execute(
         text(sql),
         {"qv": qv, "pool": norm_pool(pool), "limit": limit},
     ).all()
+    sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     if not rows:
         return None
 
@@ -60,7 +64,9 @@ def semantic_search(
             "embedding_dim": len(vec),
             "embedding_preview": [round(float(x), 6) for x in vec[:8]],
             "distance_metric": "cosine (pgvector <=>)",
+            "raw_cosine_distances": [round(float(r.dist), 6) for r in rows[:5]],
             "sql": sql,
+            "sql_ms": sql_ms,
         }
         if verbose
         else None
