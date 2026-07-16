@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -112,7 +114,9 @@ def top_skills(
         f"WHERE {_POOL_WHERE} AND pt.is_deleted = false{where_extra} "
         f"GROUP BY s.canonical ORDER BY n DESC LIMIT :limit"
     )
+    sql_start = time.perf_counter()
     rows = _top(session, sql, pool, limit, extra_params=extra_params)
+    sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
@@ -134,7 +138,7 @@ def top_skills(
         citation_label = f"기술태그 집계 · 공고 {total:,}건"
         facts = f"pool={pool or '전체'} 총 {total:,}건 기준 상위 기술 — {facts_body}"
     debug = (
-        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}}
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}, "sql_ms": sql_ms}
         if verbose
         else None
     )
@@ -162,13 +166,19 @@ def top_concepts(
         f"WHERE {_POOL_WHERE} AND pc.is_deleted = false "
         f"GROUP BY c.name ORDER BY n DESC LIMIT :limit"
     )
+    sql_start = time.perf_counter()
     rows = _top(session, sql, pool, limit)
+    sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
     ]
     facts = "; ".join(f"{n} {c}건" for n, c in rows)
-    debug = {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}} if verbose else None
+    debug = (
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}, "sql_ms": sql_ms}
+        if verbose
+        else None
+    )
     return {
         "tool": "sql",
         "tool_result": {"kind": "list", "label": "빈출 개념·패러다임", "items": items, "debug": debug},
@@ -203,7 +213,9 @@ def top_certs(
         f"WHERE {_POOL_WHERE} AND pc.is_deleted = false{where_extra} "
         f"GROUP BY ct.name ORDER BY n DESC LIMIT :limit"
     )
+    sql_start = time.perf_counter()
     rows = _top(session, sql, pool, limit, extra_params=extra_params)
+    sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
@@ -223,7 +235,7 @@ def top_certs(
         citation_label = f"자격증 요구 집계 · 공고 {total:,}건"
         facts = f"pool={pool or '전체'} 총 {total:,}건 기준 상위 자격증 — {facts_body}"
     debug = (
-        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}}
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}, "sql_ms": sql_ms}
         if verbose
         else None
     )
@@ -249,13 +261,19 @@ def top_locations(
         f"WHERE {_POOL_WHERE} AND p.region_district IS NOT NULL "
         f"GROUP BY p.region_district ORDER BY n DESC LIMIT :limit"
     )
+    sql_start = time.perf_counter()
     rows = _top(session, sql, pool, limit)
+    sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
     ]
     facts = "; ".join(f"{n} {c}건({round(100 * c / total, 1) if total else 0}%)" for n, c in rows)
-    debug = {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}} if verbose else None
+    debug = (
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}, "sql_ms": sql_ms}
+        if verbose
+        else None
+    )
     return {
         "tool": "sql",
         "tool_result": {"kind": "list", "label": "지역별 공고 분포", "items": items, "debug": debug},
@@ -295,7 +313,9 @@ def skill_demand(
         f"{join}"
         f"WHERE pt.skill_id = :sid AND pt.is_deleted = false AND {_POOL_WHERE}{where_extra}"
     )
+    sql_start = time.perf_counter()
     n = int(session.execute(text(sql), params).scalar() or 0)
+    sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     pct = round(100 * n / total, 1) if total else 0.0
     if category or entry_level:
         label = f"{canonical} 수요{_filter_label_suffix(category, entry_level)}"
@@ -311,7 +331,7 @@ def skill_demand(
         label = f"{canonical} 수요"
         citation_label = f"{canonical} 요구 공고 {n:,}건"
         facts = f"{canonical}을(를) 요구하는 공고는 {n:,}건(pool={pool or '전체'} {total:,}건 중 {pct}%)"
-    debug = {"sql": sql, "params": params} if verbose else None
+    debug = {"sql": sql, "params": params, "sql_ms": sql_ms} if verbose else None
     return {
         "tool": "sql",
         "tool_result": {
@@ -349,6 +369,7 @@ def multi_skill_compare(
     items = []
     resolved_names = []
     last_sql: str | None = None
+    sql_ms_total = 0.0
 
     for name in skill_names:
         resolved = resolve_skill(session, name)
@@ -366,7 +387,9 @@ def multi_skill_compare(
             f"WHERE pt.skill_id = :sid AND pt.is_deleted = false AND {_POOL_WHERE}{where_extra}"
         )
         last_sql = sql
+        sql_start = time.perf_counter()
         n = int(session.execute(text(sql), params).scalar() or 0)
+        sql_ms_total += (time.perf_counter() - sql_start) * 1000
         pct = round(100 * n / total, 1) if total else 0.0
         items.append({"name": canonical, "metric": f"{n:,}건", "pct": pct})
         resolved_names.append(canonical)
@@ -384,6 +407,7 @@ def multi_skill_compare(
         {
             "sql": last_sql,
             "note": "동일 SQL을 기술마다 :sid만 바꿔 재실행(위는 마지막 실행분)",
+            "sql_ms": round(sql_ms_total, 1),
         }
         if verbose
         else None

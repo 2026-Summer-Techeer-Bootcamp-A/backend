@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # company_by_skill과 같은 6시간으로 잡는다. 실시간성이 필요 없는데도 매 요청마다
     # DB를 다시 때리던 게 부하테스트에서 드러난 병목의 상당 부분이었다.
     stats_cache_ttl_seconds: int = 6 * 60 * 60
+    # 공고 목록 페이지네이션 total(COUNT) 전용 TTL. 목록 SELECT 자체는 인덱스로
+    # 즉시 최신 상태를 보여주는데, COUNT까지 stats_cache_ttl_seconds(6시간)를
+    # 재사용하면 새 공고가 들어와도 총 건수가 6시간 동안 그대로라 목록은 늘어나는데
+    # total만 안 늘어나는 것처럼 보인다. COUNT는 seq scan(선택도 40.6%라 인덱스로도
+    # 못 줄임)이라 캐싱 자체는 필요하지만, 그 부작용을 줄이도록 10분으로 짧게 잡는다.
+    posting_count_cache_ttl_seconds: int = 10 * 60
     # 참조 캐시도 성능 보조 기능이라 Redis 장애가 API를 오래 막지 않도록 짧은 타임아웃.
     reference_cache_socket_timeout_seconds: float = 0.5
 
@@ -50,6 +56,9 @@ class Settings(BaseSettings):
     # 순차 2회 호출하므로 thinking 토큰 절감이 지연 시간에 직접 반영된다.
     gemini_thinking_level: str = "minimal"
     gemini_max_output_tokens: int = 800
+    # 타임아웃/네트워크 오류 시 재시도 횟수(최초 시도 제외). RAG 응답 지연에 직접 더해지므로
+    # 크게 두지 않는다 — 1회 재시도까지만 허용.
+    gemini_max_retries: int = 1
 
     # 임베딩 모델 = 로컬 BGE-M3(출력 1024차원). pgvector 컬럼 차원과 반드시 일치해야 함.
     # (구값 1536은 OpenAI ada-002 기준 잔재였음 — BGE-M3로 확정하며 1024로 정정.)
