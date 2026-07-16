@@ -368,8 +368,25 @@ async def lifespan(app: FastAPI):
 
         # Composite index for posting list filters (pool, close_date, post_date DESC)
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_posting_list_filter 
-            ON posting (pool, close_date, post_date DESC) 
+            CREATE INDEX IF NOT EXISTS ix_posting_list_filter
+            ON posting (pool, close_date, post_date DESC)
+            WHERE is_deleted = false;
+        """))
+
+        # /api/v1/postings 목록 쿼리 전용. 부하테스트(300VU)에서 이 쿼리가 공고 565,191행을
+        # Parallel Seq Scan으로 통째로 훑고 있었다(실측 205.6ms, buffers 51,365) — 위
+        # ix_posting_list_filter가 close_date를 컬럼에 포함하고 있는데, 실제 쿼리는
+        # "close_date IS NULL OR close_date >= CURRENT_DATE"라는 OR 조건이라 그 인덱스를
+        # 못 탄다. CURRENT_DATE는 IMMUTABLE이 아니라(호출 시점마다 값이 바뀜) 부분 인덱스의
+        # WHERE 조건에도 넣을 수 없다. 그래서 이 인덱스는 close_date를 아예 빼고 pool
+        # 동등조건 + 정렬 컬럼(post_date DESC NULLS LAST, id DESC)만으로 좁힌 뒤, close_date
+        # 조건은 인덱스 스캔 결과에 대한 재검사(filter)로 거른다 — 목록 조회의 기본 정렬
+        # (app/crud/posting.py _get_filtered_postings의 latest 정렬)과 정확히 일치해야
+        # 플래너가 LIMIT/OFFSET과 함께 이 인덱스를 스캔으로 쓴다. 적용 후 프로덕션 실측
+        # 205.6ms/buffers 51,365 -> 3.6ms/buffers 17.
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_posting_list_latest
+            ON posting (pool, post_date DESC NULLS LAST, id DESC)
             WHERE is_deleted = false;
         """))
 
