@@ -482,10 +482,12 @@ def get_skill_share(
         sample_size = int(rows[0].total_postings) if rows else 0
         return items, sample_size
 
+    # id는 posting의 기본키라 이미 유일함. DISTINCT를 걸면 postgres가 dedup을 위해
+    # 매칭 행 전체(도메스틱 풀 기준 수십만 건)를 정렬해야 해서, 인덱스가 있어도
+    # COUNT(*) 대비 수백 ms~1초의 불필요한 external sort가 추가된다(EXPLAIN ANALYZE로
+    # 실측: Sort Method: external merge 단계가 전체 실행시간의 90% 이상 차지).
     sample_size = (
-        session.scalar(
-            select(func.count(distinct(Posting.id))).where(Posting.pool == pool, Posting.is_deleted.is_(False))
-        )
+        session.scalar(select(func.count(Posting.id)).where(Posting.pool == pool, Posting.is_deleted.is_(False)))
         or 0
     )
 
