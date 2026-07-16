@@ -13,8 +13,10 @@ from fastapi import APIRouter, Header, Query
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 
+from app.core.config import settings
 from app.core.deps import SessionDep
 from app.core.redis import redis_client
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 from app.services.rag.llm import get_llm
 from app.services.stack_insight import build_stack_insight
 from app.crud.insight import (
@@ -286,8 +288,16 @@ def stats_response_rate(
     pool: Annotated[Pool, Query(description="global 또는 domestic")] = "domestic",
 ) -> ResponseRateResponse:
     """응답률 분포(20포인트 폭 5버킷) + 회사별 평균 응답률. response_rate는 wanted 소스만 적재됨."""
+    # posting 데이터는 스크래핑 주기로만 바뀌는데 매 요청마다 다시 집계하고
+    # 있었다(부하테스트에서 확인된 병목). 개인화 요소가 없는 순수 통계라
+    # pool만으로 캐시 키를 잡으면 된다.
+    cache_key = make_reference_cache_key("stats_response_rate", {"pool": pool})
+    cached = get_cached(cache_key, ResponseRateResponse)
+    if cached is not None:
+        return cached
+
     result = get_response_rate(session=session, pool=pool)
-    return ResponseRateResponse(
+    response = ResponseRateResponse(
         pool=pool,
         median_rate=result["median_rate"],
         levels=result["levels"],
@@ -295,6 +305,8 @@ def stats_response_rate(
         as_of=date.today().isoformat(),
         sample_size=result["sample_size"],
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/skill-trend-yearly", response_model=SkillTrendYearlyResponse)
@@ -349,8 +361,15 @@ def stats_hot_companies(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> HotCompaniesResponse:
     """최근 days일간(풀 내 최신 공고일 기준) 신규 공고가 많은 활발 기업."""
+    cache_key = make_reference_cache_key("stats_hot_companies", {"pool": pool, "days": days, "limit": limit})
+    cached = get_cached(cache_key, HotCompaniesResponse)
+    if cached is not None:
+        return cached
+
     items, as_of = get_hot_companies(session=session, pool=pool, days=days, limit=limit)
-    return HotCompaniesResponse(pool=pool, days=days, items=items, as_of=as_of)
+    response = HotCompaniesResponse(pool=pool, days=days, items=items, as_of=as_of)
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get("/stats/region-density", response_model=RegionDensityResponse)
@@ -360,8 +379,15 @@ def stats_region_density(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> RegionDensityResponse:
     """지역(구/동)별 공고 밀도. region_district는 domestic 공고에만 적재됨."""
+    cache_key = make_reference_cache_key("stats_region_density", {"pool": pool, "limit": limit})
+    cached = get_cached(cache_key, RegionDensityResponse)
+    if cached is not None:
+        return cached
+
     items, as_of = get_region_density(session=session, pool=pool, limit=limit)
-    return RegionDensityResponse(pool=pool, items=items, as_of=as_of)
+    response = RegionDensityResponse(pool=pool, items=items, as_of=as_of)
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 @router.get(

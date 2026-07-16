@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     reference_cache_ttl_seconds: int = 24 * 60 * 60
     # 기술별 기업 목록은 posting과 더 밀접해 자주 바뀔 수 있어 6시간으로 짧게.
     company_by_skill_cache_ttl_seconds: int = 6 * 60 * 60
+    # stats/*, 지도 등 posting 집계 통계도 수집 주기(스크래핑)에만 바뀌는 데이터라
+    # company_by_skill과 같은 6시간으로 잡는다. 실시간성이 필요 없는데도 매 요청마다
+    # DB를 다시 때리던 게 부하테스트에서 드러난 병목의 상당 부분이었다.
+    stats_cache_ttl_seconds: int = 6 * 60 * 60
     # 참조 캐시도 성능 보조 기능이라 Redis 장애가 API를 오래 막지 않도록 짧은 타임아웃.
     reference_cache_socket_timeout_seconds: float = 0.5
 

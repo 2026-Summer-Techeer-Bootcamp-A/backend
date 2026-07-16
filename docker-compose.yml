@@ -35,6 +35,32 @@ services:
       - "traefik.http.routers.app.tls.certresolver=myresolver"
       - "traefik.http.services.app.loadbalancer.server.port=8000"
 
+  # 부하테스트로 확인된 병목: 워커 4개 × pool_size 40 = 최대 160개의 실제
+  # Postgres 백엔드 프로세스가 2 vCPU DB에 동시에 몰리면, CPU 사용률 자체는
+  # 낮아도(50%대) 컨텍스트 스위칭 경합으로 지연이 크게 늘었다(pg_stat_activity의
+  # active 세션이 116~121까지 치솟는 걸 직접 관측). PgBouncer를 트랜잭션 풀링
+  # 모드로 앞에 두면, 앱은 지금처럼 많은 커넥션을 유지해도 실제 Postgres 백엔드
+  # 수는 DEFAULT_POOL_SIZE만큼만 유지되어 이 경합이 사라진다. app의 DATABASE_URL을
+  # Cloud SQL 대신 이 서비스(pgbouncer:6432)로 돌려야 효과가 있다.
+  pgbouncer:
+    image: edoburu/pgbouncer:1.24.1-p0
+    restart: unless-stopped
+    environment:
+      - DB_HOST=${POSTGRES_HOST}
+      - DB_PORT=${POSTGRES_PORT}
+      - DB_USER=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_NAME=${POSTGRES_DB}
+      - POOL_MODE=transaction
+      - AUTH_TYPE=scram-sha-256
+      # 앱 쪽 이론상 최대(워커 4 × 40)보다 여유 있게 잡는다.
+      - MAX_CLIENT_CONN=300
+      # 실제 Postgres 백엔드로 나가는 연결 수 상한. 2 vCPU에서 컨텍스트 스위칭
+      # 경합 없이 처리 가능한 수준으로 낮게 잡는다(추후 실측 기반으로 조정).
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+    logging: *default-logging
+
   traefik:
     image: traefik:v3.0
     command:
