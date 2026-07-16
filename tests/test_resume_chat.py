@@ -404,3 +404,85 @@ def test_run_chat_events_answers_resume_recommend_when_resume_attached(session: 
     assert "result" in kinds
     result_event = next(e for e in events if e["type"] == "result")
     assert result_event["result"]["kind"] == "posting_list"
+
+
+# --- 시장 모수 3년 윈도우 회귀 테스트: "마감 전 공고만"에서 "최근 3년 이내(마감 포함)"로 --
+
+
+@pytest.fixture
+def window_session() -> Iterator[Session]:
+    """resume_coverage/resume_recommend가 새 3년 윈도우 필터를 쓰는지 전용으로 검증하는
+    독립 세션 — 위 `session` 픽스처는 sample_size=2 등 기존 테스트들이 정확한 값에
+    의존하므로 새 포스팅을 더 심으면 그 테스트들이 깨진다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+    with testing_session() as s:
+        python = Skill(canonical="Python", category="language")
+        s.add(python)
+        s.flush()
+
+        # 최근(3년 이내) 게시 + 열려 있음 — 항상 포함.
+        recent_open = Posting(
+            source="t", source_uid="recent_open", pool="domestic", title="최근 오픈", company="회사A",
+            post_date=date(2026, 1, 1), close_date=None,
+        )
+        # 최근(3년 이내) 게시 + 마감됨 — 예전엔 빠졌지만 이제는 포함되어야 한다.
+        recent_closed = Posting(
+            source="t", source_uid="recent_closed", pool="domestic", title="최근 마감", company="회사B",
+            post_date=date(2026, 1, 2), close_date=date(2026, 2, 1),
+        )
+        # 3년보다 오래전 게시(2020) — 마감 여부와 무관하게 이제는 제외되어야 한다.
+        old_posting = Posting(
+            source="t", source_uid="old", pool="domestic", title="오래된 공고", company="회사C",
+            post_date=date(2020, 1, 1), close_date=None,
+        )
+        s.add_all([recent_open, recent_closed, old_posting])
+        s.flush()
+        s.add_all(
+            [
+                PostingTech(posting_id=recent_open.id, skill_id=python.id),
+                PostingTech(posting_id=recent_closed.id, skill_id=python.id),
+                PostingTech(posting_id=old_posting.id, skill_id=python.id),
+            ]
+        )
+        s.commit()
+        s.info["python_id"] = python.id
+        s.info["recent_open_id"] = recent_open.id
+        s.info["recent_closed_id"] = recent_closed.id
+        s.info["old_id"] = old_posting.id
+        yield s
+    engine.dispose()
+
+
+def test_resume_coverage_matched_postings_includes_recent_closed_excludes_old(
+    window_session: Session,
+) -> None:
+    owned = {window_session.info["python_id"]}
+    result = resume_tool.resume_coverage(window_session, owned, pool="domestic")
+    assert result is not None
+    # recent_open + recent_closed 2건만 표본에 잡혀야 한다(old_posting은 2020년 게시라 제외).
+    assert result["n"] == 2
+    assert "2건" in result["facts"]
+    assert "최근 3년" in result["facts"]
+    assert "마감 포함" in result["facts"]
+
+
+def test_resume_recommend_includes_recent_closed_excludes_old_and_marks_closed(
+    window_session: Session,
+) -> None:
+    owned = {window_session.info["python_id"]}
+    result = resume_tool.resume_recommend(window_session, owned, pool="domestic")
+    assert result is not None
+    items = result["tool_result"]["items"]
+    ids = {it["id"] for it in items}
+    # old_posting(2020년 게시)은 3년 윈도우 밖이라 추천 대상에서 빠져야 한다.
+    assert window_session.info["old_id"] not in ids
+    assert window_session.info["recent_open_id"] in ids
+    assert window_session.info["recent_closed_id"] in ids
+
+    closed_item = next(it for it in items if it["id"] == window_session.info["recent_closed_id"])
+    open_item = next(it for it in items if it["id"] == window_session.info["recent_open_id"])
+    # 마감된 공고를 지원 가능한 것처럼 보이지 않게 metric에 마감 표시가 붙어야 한다.
+    assert "(마감)" in closed_item["metric"]
+    assert "(마감)" not in open_item["metric"]
