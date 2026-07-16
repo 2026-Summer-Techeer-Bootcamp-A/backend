@@ -1,14 +1,13 @@
 x-logging: &default-logging
-  # 예전엔 Loki+Alloy를 self-host해서 로그를 모았는데, 이 두 컨테이너가
-  # app-vm의 4 vCPU를 uvicorn과 나눠 쓰면서 부하테스트 중 앱 자체의 처리
-  # 용량을 깎아먹고 있었다(300VU에서 DB를 안 건드리는 /healthz까지 11초씩
-  # 걸린 원인). VM의 서비스 계정에 이미 logging.write 권한이 있어, Docker의
-  # gcplogs 드라이버로 각 컨테이너 로그를 Cloud Logging에 직접 보내도록
-  # 바꿨다. Loki/Alloy 컨테이너 자체가 통째로 필요 없어졌다.
-  driver: gcplogs
+  # gcplogs로 전환을 시도했으나 VM 서비스 계정의 OAuth scope에는 logging.write가
+  # 있어도 실제 IAM 역할(roles/logging.logWriter)이 없어 "PermissionDenied:
+  # logging.logEntries.create" 에러로 전체 컨테이너가 기동 실패했다(실제
+  # 프로덕션 다운 발생, 즉시 롤백). IAM 역할을 먼저 부여한 뒤 다시 시도해야
+  # 한다. 그때까지 기존 json-file 드라이버로 되돌린다.
+  driver: json-file
   options:
-    gcp-log-cmd: "true"
-    labels: "com.docker.compose.service"
+    max-size: "10m"
+    max-file: "3"
 
 services:
   app:
