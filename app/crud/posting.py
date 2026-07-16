@@ -282,8 +282,11 @@ def _count_filtered_postings(
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
 ) -> int:
+    # id는 posting의 기본키(_apply_posting_filters는 JOIN 없이 FROM posting만 사용)라
+    # 이미 유일함. DISTINCT는 postgres가 dedup을 위해 매칭 행 전체를 정렬하게 만들어
+    # 실측 기준 쿼리 시간의 90%+를 차지하는 불필요한 external sort를 유발한다.
     stmt = _apply_posting_filters(
-        select(func.count(distinct(Posting.id))),
+        select(func.count(Posting.id)),
         pool=pool,
         position=position,
         district=district,
