@@ -50,6 +50,14 @@ class ToolResultItem(BaseModel):
     id: int | None = None
     company: str | None = None
     pool: str | None = None
+    # posting_list 카드에 보유(초록)/부족(빨강) 스킬 배지를 붙이기 위한 필드 — 이력서가
+    # 붙은 resume_recommend에서만 채워지고(오너드 스킬 집합이 있어야 matched/missing을
+    # 가를 수 있다), 이력서 없이 도는 semantic_search에서는 항상 None으로 둔다.
+    matched_skills: list[str] | None = None
+    missing_skills: list[str] | None = None
+    # posting_list 카드에 지역 텍스트를 보여주기 위한 필드 — region_district(구/군)가
+    # 있으면 그걸, 없으면 region_city를 쓴다. resume_recommend/semantic_search 둘 다 채운다.
+    region: str | None = None
 
 
 class ToolResult(BaseModel):

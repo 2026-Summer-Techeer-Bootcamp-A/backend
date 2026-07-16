@@ -43,7 +43,7 @@ def semantic_search(
     # company) 중복을 걸러내는 방식으로 우회한다.
     fetch_limit = min(limit * 5, 40)
     sql = (
-        f"SELECT p.id, p.title, p.company, p.pool, "
+        f"SELECT p.id, p.title, p.company, p.pool, p.region_city, p.region_district, "
         f"(e.embedding <=> CAST(:qv AS vector)) AS dist "
         f"FROM posting_embedding e "
         f"JOIN posting p ON p.id = e.id "
@@ -79,7 +79,9 @@ def semantic_search(
         label = r.title if not r.company else f"{r.title} ({r.company})"
         # K3: 실제 공고 목록이라 id/company/pool을 함께 실어 프론트가 클릭 가능한
         # 공고 카드(상세보기, 북마크)로 렌더링할 수 있게 한다. 유사도(sim)는 기존과
-        # 동일하게 pct/metric에 그대로 둔다.
+        # 동일하게 pct/metric에 그대로 둔다. region은 카드에 지역 텍스트를 보여주기
+        # 위한 필드 — 이력서(오너드 스킬)가 없는 순수 의미검색이라 matched/missing
+        # 스킬 배지는 여기서 채우지 않고 None으로 둔다.
         items.append(
             {
                 "name": label,
@@ -88,6 +90,7 @@ def semantic_search(
                 "id": r.id,
                 "company": r.company,
                 "pool": r.pool,
+                "region": r.region_district or r.region_city,
             }
         )
 
