@@ -73,7 +73,13 @@ class GeminiClient:
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "systemInstruction": {"parts": [{"text": system}]},
-            "generationConfig": {"temperature": temperature},
+            "generationConfig": {
+                "temperature": temperature,
+                # thinkingLevel은 generationConfig 최상위가 아니라 반드시 thinkingConfig
+                # 안에 중첩되어야 한다. 최상위에 두면 API가 HTTP 400 "Unknown name"을 반환한다.
+                "thinkingConfig": {"thinkingLevel": settings.gemini_thinking_level},
+                "maxOutputTokens": settings.gemini_max_output_tokens,
+            },
         }
         req = urllib.request.Request(
             GEMINI_URL_TMPL.format(model=settings.gemini_model),

@@ -13,9 +13,14 @@ from sqlalchemy.orm import Session
 from app.services.rag.embedder import embed_query
 from app.services.rag.tools.common import norm_pool
 
+# 코퍼스의 78%가 비개발 공고라(부동산 사무직, 간호사 등) 필터 없이는 제목만으로 만든
+# 임베딩의 글자 유사도 때문에 무관한 공고가 상위에 올라온다(예: "머신러닝" 질의에 "머시닝"
+# 기계가공 공고가 매칭). e.is_tech_posting = true 조건은 부분 HNSW 인덱스
+# (ix_posting_embedding_hnsw_tech, app/main.py)의 조건과 정확히 일치해야 플래너가
+# 그 인덱스를 탄다.
 _POOL_WHERE = (
     "(CAST(:pool AS text) IS NULL OR p.pool = CAST(:pool AS text)) "
-    "AND p.is_deleted = false"
+    "AND p.is_deleted = false AND e.is_tech_posting = true"
 )
 
 
