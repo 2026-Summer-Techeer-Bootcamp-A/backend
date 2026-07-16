@@ -19,6 +19,7 @@ from app.schemas.match import (
     Pool,
 )
 from app.core.redis import get_resume_confirm_session
+from app.services.job_category import resolve_job_category
 
 #저장된 이력서에서 기술 가져옴
 def get_skill_ids_from_resume(
@@ -94,13 +95,27 @@ def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
     )
 
     if position:
-        query = (
-            query.join(PostingCategory, PostingCategory.posting_id == Posting.id)
-            .where(
-                PostingCategory.category == position,
-                PostingCategory.is_deleted.is_(False),
+        # position은 posting_category.category와 정확히 일치시키면 안 된다. 프론트가
+        # 보내는 'backend'/'frontend'/'devops'/'data' 같은 토큰은 실제 category 값
+        # ('서버/백엔드 개발자' 등)과 문자열이 달라 exact match로는 절대 안 걸린다
+        # (app/crud/insight.py get_skill_share의 mv_skill_share.position 버그와 같은
+        # 종류의 문제). RAG sql_tool과 동일하게 안전한 ILIKE 부분 문자열 토큰으로 해소한다.
+        # 알 수 없는 position은 0건으로 단정하지 않고 필터를 걸지 않는다(정직하게 폴백).
+        category_token = resolve_job_category(position)
+        if category_token is not None:
+            # ILIKE 토큰은 한 posting에 붙은 여러 posting_category 행 중 2개 이상과
+            # 동시에 매칭될 수 있어(예: "서버/백엔드 개발자"와 "백엔드개발자"를 함께 태그한
+            # 공고), exact match였던 이전 버전과 달리 distinct 없이는 posting.id가
+            # 중복될 수 있다. 이 서브쿼리는 이후 COUNT/JOIN에 그대로 쓰이므로 distinct로
+            # posting 단위 유일성을 보장한다.
+            query = (
+                query.join(PostingCategory, PostingCategory.posting_id == Posting.id)
+                .where(
+                    PostingCategory.category.ilike(f"%{category_token}%"),
+                    PostingCategory.is_deleted.is_(False),
+                )
+                .distinct()
             )
-        )
 
     return query
 
