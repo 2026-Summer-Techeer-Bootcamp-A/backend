@@ -66,7 +66,7 @@ def get_posting_similar(
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> SimilarPostingsResponse:
     """자기 자신을 제외한, 요구 기술 겹침이 많은 순 유사 공고."""
-    cache_key = make_reference_cache_key("posting_similar", {"posting_id": posting_id, "limit": limit})
+    cache_key = make_reference_cache_key("posting_similar_v2", {"posting_id": posting_id, "limit": limit})
     cached = get_cached(cache_key, SimilarPostingsResponse)
     if cached is not None:
         return cached
