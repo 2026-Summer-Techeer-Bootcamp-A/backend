@@ -179,12 +179,14 @@ def _pool_skill_shares(session: Session, pool: str) -> tuple[dict[int, dict], in
     if total == 0:
         return {}, 0
 
+    # posting_tech가 (posting_id, skill_id) 유니크라서, skill 단위로 GROUP BY하면
+    # 그 안에서 posting_id는 중복될 수 없다. DISTINCT를 빼도 결과는 같다.
     rows = session.execute(
         select(
             Skill.id,
             Skill.canonical,
             Skill.category,
-            func.count(distinct(PostingTech.posting_id)).label("n"),
+            func.count(PostingTech.posting_id).label("n"),
         )
         .select_from(Posting)
         .join(PostingTech, PostingTech.posting_id == Posting.id)
@@ -1053,14 +1055,17 @@ def get_group_share(session: Session, *, group: str, pool: str) -> dict:
     if union_count == 0:
         return {"union_count": 0, "items": []}
 
+    # union_count(위)와 달리 여기는 skill 하나로 GROUP BY하므로 posting_tech의
+    # (posting_id, skill_id) 유니크 제약상 posting_id 중복이 날 수 없다. DISTINCT
+    # 불필요.
     rows = session.execute(
-        select(Skill.canonical, func.count(distinct(PostingTech.posting_id)).label("n"))
+        select(Skill.canonical, func.count(PostingTech.posting_id).label("n"))
         .select_from(PostingTech)
         .join(Skill, Skill.id == PostingTech.skill_id)
         .join(Posting, Posting.id == PostingTech.posting_id)
         .where(*base_filters)
         .group_by(Skill.canonical)
-        .order_by(func.count(distinct(PostingTech.posting_id)).desc())
+        .order_by(func.count(PostingTech.posting_id).desc())
     ).all()
 
     items = [
@@ -1072,8 +1077,10 @@ def get_group_share(session: Session, *, group: str, pool: str) -> dict:
 
 def get_concept_tech(session: Session, *, pool: str, top_concepts: int = 6, top_techs: int = 5) -> dict:
     """개념→기술 Sankey. posting_concept×posting_tech 공동출현 상위 개념 N × 개념당 상위 기술 M."""
+    # posting_concept도 (posting_id, concept_id) 유니크라 concept 하나로 묶은
+    # 그룹 안에서는 posting_id가 중복되지 않는다. DISTINCT 불필요.
     concept_rows = session.execute(
-        select(Concept.id, Concept.name, func.count(distinct(PostingConcept.posting_id)).label("n"))
+        select(Concept.id, Concept.name, func.count(PostingConcept.posting_id).label("n"))
         .select_from(PostingConcept)
         .join(Concept, Concept.id == PostingConcept.concept_id)
         .join(Posting, Posting.id == PostingConcept.posting_id)
@@ -1084,7 +1091,7 @@ def get_concept_tech(session: Session, *, pool: str, top_concepts: int = 6, top_
             Posting.is_deleted.is_(False),
         )
         .group_by(Concept.id, Concept.name)
-        .order_by(func.count(distinct(PostingConcept.posting_id)).desc())
+        .order_by(func.count(PostingConcept.posting_id).desc())
         .limit(top_concepts)
     ).all()
 
@@ -1094,11 +1101,14 @@ def get_concept_tech(session: Session, *, pool: str, top_concepts: int = 6, top_
     concept_ids = [row.id for row in concept_rows]
     concept_names = {row.id: row.name for row in concept_rows}
 
+    # concept_id + skill.canonical로 묶은 그룹 안에서는 posting_concept와
+    # posting_tech 양쪽 유니크 제약 덕분에 같은 posting_id가 두 번 들어올 수
+    # 없다. DISTINCT 불필요.
     tech_rows = session.execute(
         select(
             PostingConcept.concept_id,
             Skill.canonical,
-            func.count(distinct(PostingTech.posting_id)).label("n"),
+            func.count(PostingTech.posting_id).label("n"),
         )
         .select_from(PostingConcept)
         .join(PostingTech, PostingTech.posting_id == PostingConcept.posting_id)

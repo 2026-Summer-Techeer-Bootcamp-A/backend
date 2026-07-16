@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import case, distinct, func, literal, or_, select
+from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
@@ -246,8 +246,12 @@ def _apply_posting_filters(
 def _matched_skill_count(owned_skill_ids: set[int]):
     if not owned_skill_ids:
         return literal(0)
+    # posting_tech는 (posting_id, skill_id) 유니크 제약이 있어, 특정 posting_id로
+    # 좁혀놓은 이 서브쿼리 안에서는 skill_id가 중복될 수 없다. DISTINCT는 아무
+    # 것도 걸러내지 못하면서 정렬 비용만 만든다(app/crud/posting.py의
+    # _count_filtered_postings와 같은 종류의 문제).
     return (
-        select(func.count(distinct(PostingTech.skill_id)))
+        select(func.count(PostingTech.skill_id))
         .where(
             PostingTech.posting_id == Posting.id,
             PostingTech.skill_id.in_(owned_skill_ids),
@@ -260,7 +264,7 @@ def _matched_skill_count(owned_skill_ids: set[int]):
 
 def _required_skill_count():
     return (
-        select(func.count(distinct(PostingTech.skill_id)))
+        select(func.count(PostingTech.skill_id))
         .where(PostingTech.posting_id == Posting.id, PostingTech.is_deleted.is_(False))
         .correlate(Posting)
         .scalar_subquery()
@@ -537,15 +541,17 @@ def get_similar_postings(session: Session, *, posting_id: int, limit: int = 10) 
     if not skill_ids:
         return []
 
+    # (posting_id, skill_id) 유니크 제약 덕분에 posting_id로 GROUP BY한 안에서는
+    # skill_id가 중복되지 않는다. DISTINCT 없이도 결과는 같고 정렬 비용만 없앤다.
     overlap_rows = session.execute(
-        select(PostingTech.posting_id, func.count(distinct(PostingTech.skill_id)).label("overlap"))
+        select(PostingTech.posting_id, func.count(PostingTech.skill_id).label("overlap"))
         .where(
             PostingTech.skill_id.in_(skill_ids),
             PostingTech.posting_id != posting_id,
             PostingTech.is_deleted.is_(False),
         )
         .group_by(PostingTech.posting_id)
-        .order_by(func.count(distinct(PostingTech.skill_id)).desc())
+        .order_by(func.count(PostingTech.skill_id).desc())
         .limit(limit)
     ).all()
 
