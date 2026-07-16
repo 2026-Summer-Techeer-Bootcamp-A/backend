@@ -3,11 +3,14 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
 from app.services.posting_description import normalize_jobkorea_sections
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 
 def get_resume_skill_ids(session: Session, *, resume_id: int, user_id: int) -> set[int]:
@@ -302,6 +305,14 @@ def _required_skill_count():
     )
 
 
+class _PostingCountCache(BaseModel):
+    """COUNT 캐시값 전용 최소 래퍼. reference_cache.get_cached/set_cached는 pydantic
+    모델 직렬화를 전제하는데 COUNT는 정수 하나뿐이라, 새 캐시 계층을 따로 만드는 대신
+    이 함수 안에서만 쓰는 1필드 모델로 감싸 기존 get_cached/set_cached를 그대로 재사용한다."""
+
+    total: int
+
+
 def _count_filtered_postings(
     session: Session,
     *,
@@ -318,6 +329,38 @@ def _count_filtered_postings(
     owned_skill_ids: set[int] | None = None,
     candidate_career_max: int | None = None,
 ) -> int:
+    # 이 COUNT는 선택도가 40.6%(229,553/565,191)라 인덱스를 태워도 postgres가 seq scan을
+    # 고르는 게 실제로 더 빠르다(실측: 커버링 인덱스를 만들어도 플래너가 거부) — 그래서
+    # 인덱스가 아니라 캐싱으로 우회한다. total은 page/page_size/sort와 무관하게 필터
+    # 조건에만 의존하므로(예: pool=domestic 총 건수는 페이지가 몇이든 하나) 캐시 키에는
+    # page/page_size/sort를 넣지 않는다 — 넣으면 같은 필터인데도 캐시가 페이지별로
+    # 쪼개져 재사용되지 않는다. owned_skill_ids(이력서 보유기술 매칭)와
+    # candidate_career_max(이력서 경력 상한, min_match 판정에 관여)는 둘 다 이력서에
+    # 따라 사용자마다 값이 달라지므로, 그 둘이 모두 없는 익명 요청만 캐시한다
+    # (app/routers/posting_map.py, app/routers/insight.py stats_posting_timeline과
+    # 동일한 분기).
+    cache_key = None
+    if owned_skill_ids is None and candidate_career_max is None:
+        cache_key = make_reference_cache_key(
+            "posting_count",
+            {
+                "pool": pool,
+                "position": position,
+                "district": district,
+                "deadline_within_days": deadline_within_days,
+                "q": q,
+                # 순서만 다른 동일 skills 조합이 다른 키로 갈리지 않도록 정렬해서 직렬화한다.
+                "skills": sorted(skills) if skills else skills,
+                "industry": industry,
+                "rich_only": rich_only,
+                "match_only": match_only,
+                "min_match": min_match,
+            },
+        )
+        cached = get_cached(cache_key, _PostingCountCache)
+        if cached is not None:
+            return cached.total
+
     # id는 posting의 기본키(_apply_posting_filters는 JOIN 없이 FROM posting만 사용)라
     # 이미 유일함. DISTINCT는 postgres가 dedup을 위해 매칭 행 전체를 정렬하게 만들어
     # 실측 기준 쿼리 시간의 90%+를 차지하는 불필요한 external sort를 유발한다.
@@ -336,7 +379,12 @@ def _count_filtered_postings(
         owned_skill_ids=owned_skill_ids,
         candidate_career_max=candidate_career_max,
     )
-    return session.execute(stmt).scalar_one()
+    total = session.execute(stmt).scalar_one()
+
+    if cache_key is not None:
+        set_cached(cache_key, _PostingCountCache(total=total), settings.posting_count_cache_ttl_seconds)
+
+    return total
 
 
 def _get_filtered_postings(
