@@ -41,10 +41,15 @@ class Settings(BaseSettings):
     resume_parse_max_bytes: int = 10 * 1024 * 1024
     resume_confirm_session_ttl_seconds: int = 3600
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
     # 엄격한 면접관 시스템 프롬프트 + JSON 모드 조합은 실측 16~17초까지 걸려
     # 기존 10초 기본값으로는 항상 폴백으로 빠졌다. 여유를 두고 25초로 상향.
     gemini_timeout_seconds: float = 25.0
+    # gemini-3.x는 thinking을 완전히 끌 수 없고 "minimal"이 최소값이다(2.5 계열의
+    # thinkingBudget과는 다른 파라미터). RAG 파이프라인은 플래너+합성으로 LLM을
+    # 순차 2회 호출하므로 thinking 토큰 절감이 지연 시간에 직접 반영된다.
+    gemini_thinking_level: str = "minimal"
+    gemini_max_output_tokens: int = 800
 
     # 임베딩 모델 = 로컬 BGE-M3(출력 1024차원). pgvector 컬럼 차원과 반드시 일치해야 함.
     # (구값 1536은 OpenAI ada-002 기준 잔재였음 — BGE-M3로 확정하며 1024로 정정.)
@@ -60,5 +65,11 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = "http://tempo:4317"
     otel_service_name: str = "career-backend"
 
+    # anyio 기본 스레드 리미터 토큰 수. 엔드포인트 대부분이 동기 def라 워커당 이
+    # 리미터를 공유하는데, 기본값 40은 워커당 동시 처리 가능한 동기 요청 수의
+    # 상한이다. Gemini 호출이 urllib 동기 호출로 최대 gemini_timeout_seconds(25초)까지
+    # 스레드를 점유할 수 있어, 40으로는 부하 상황에서 스레드 차례를 기다리다
+    # 다른 요청(예: /healthz)까지 줄줄이 막히는 head-of-line blocking이 실측됐다.
+    thread_pool_size: int = 120
 
 settings = Settings()

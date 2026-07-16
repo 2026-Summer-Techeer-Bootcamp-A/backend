@@ -149,5 +149,9 @@ class PostingEmbedding(TimestampMixin, SoftDeleteMixin, Base):
         Text().with_variant(Vector(settings.embedding_dim), "postgresql"), nullable=False
     )
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 의미 검색 대상을 개발 공고로 좁히기 위한 비정규화 플래그. posting_tech/job_category를
+    # 조인으로 판정하지 않고 이 테이블에 물리적으로 들고 있는 이유는, 부분 HNSW 인덱스의
+    # WHERE 조건이 인덱스 대상 테이블 자신의 컬럼만 참조할 수 있기 때문이다.
+    is_tech_posting: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     posting: Mapped[Posting] = relationship(back_populates="embedding")

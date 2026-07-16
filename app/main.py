@@ -1,3 +1,4 @@
+import anyio.to_thread
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -36,6 +37,12 @@ async def lifespan(app: FastAPI):
     # 애플리케이션 시작 시, SQLAlchemy 모델들을 기반으로 DB에 아직 없는 테이블들을 모두 자동 생성합니다.
     # 추후 Alembic 등 마이그레이션 도구가 정착되면 제거할 개발 편의성 코드입니다.
     Base.metadata.create_all(bind=engine)
+
+    # anyio 기본 스레드 리미터를 워커별로 상향한다. --workers > 1이면 이 lifespan은
+    # 워커마다 각자 실행되므로, 이 설정도 워커마다 각자 적용되어야 한다 — 아래 advisory
+    # lock은 DDL 중복 실행만 막기 위한 것이라, 이 리미터 설정은 그 lock/unlock과
+    # 무관하게 매 워커에서 독립적으로 실행돼야 하므로 lock 블록 밖(앞)에 둔다.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = settings.thread_pool_size
 
     # --workers > 1이면 워커 프로세스마다 이 lifespan이 각자 실행된다. 아래 DDL을
     # 동시에 두 워커가 각자 트랜잭션 안에서 실행하면 서로의 테이블 락을 기다리며
@@ -83,6 +90,25 @@ async def lifespan(app: FastAPI):
         conn.execute(text(
             'CREATE INDEX IF NOT EXISTS ix_posting_embedding_hnsw_cosine '
             'ON posting_embedding USING hnsw (embedding vector_cosine_ops);'
+        ))
+
+        # posting_embedding은 이미 존재하는 테이블이라 Base.metadata.create_all이 새로
+        # 추가된 컬럼을 반영하지 못한다(테이블이 없을 때만 생성) — 그래서 컬럼 추가는
+        # 여기 명시적 DDL로 처리한다. 코퍼스의 78%가 비개발 공고라 의미 검색 대상을
+        # 개발 공고로 좁히기 위한 플래그(app/models/posting.py PostingEmbedding 참고).
+        conn.execute(text(
+            'ALTER TABLE posting_embedding ADD COLUMN IF NOT EXISTS '
+            'is_tech_posting boolean NOT NULL DEFAULT false;'
+        ))
+
+        # 위 is_tech_posting = true 조건으로 좁힌 부분 HNSW 인덱스. 전체 인덱스(3.68GB)가
+        # shared_buffers(2.4GB)보다 커 메모리에 다 못 올라가던 문제를, 개발 공고만
+        # 남기면 약 0.8GB로 줄여 해결한다. vector_tool.py의 쿼리 조건과 정확히 일치해야
+        # 플래너가 이 인덱스를 탄다.
+        conn.execute(text(
+            'CREATE INDEX IF NOT EXISTS ix_posting_embedding_hnsw_tech '
+            'ON posting_embedding USING hnsw (embedding vector_cosine_ops) '
+            'WHERE is_tech_posting = true;'
         ))
 
         # Create mv_skill_share materialized view if not exists
@@ -538,7 +564,11 @@ def read_root(request: Request):
 
 
 @app.get("/healthz")
-def healthz() -> dict[str, str]:
+# 이 엔드포인트만 async def다: dict 하나만 반환할 뿐 DB/Redis 등 I/O가 전혀 없어
+# 이벤트 루프에서 바로 실행해도 루프를 막지 않는다. async로 두면 anyio 스레드풀을
+# 아예 거치지 않으므로, 다른 동기 엔드포인트들이 스레드풀을 모두 점유해 고갈되는
+# 상황에서도 헬스체크만은 즉시 응답한다(실측: 동기 def일 때 300VU 부하에서 p95 27.3초).
+async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 @app.get("/test-ui")
