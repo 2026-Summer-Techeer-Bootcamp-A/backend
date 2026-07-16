@@ -52,7 +52,12 @@ services:
       - DB_PASSWORD=${POSTGRES_PASSWORD}
       - DB_NAME=${POSTGRES_DB}
       - POOL_MODE=transaction
-      - AUTH_TYPE=scram-sha-256
+      # app<->pgbouncer는 docker 내부 네트워크로만 오가 외부에 노출되지 않는다.
+      # scram-sha-256으로 두면 userlist.txt에 해시만 저장되어 pgbouncer가 그
+      # 값으로는 Cloud SQL과 SCRAM 핸드셰이크를 못 끝낸다(wrong password type).
+      # plain으로 평문 비밀번호를 들고 있어야 서버 쪽 SCRAM을 pgbouncer가 대신
+      # 완료할 수 있다.
+      - AUTH_TYPE=plain
       # 앱 쪽 이론상 최대(워커 4 × 40)보다 여유 있게 잡는다.
       - MAX_CLIENT_CONN=300
       # 실제 Postgres 백엔드로 나가는 연결 수 상한. 2 vCPU에서 컨텍스트 스위칭
