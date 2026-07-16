@@ -33,6 +33,10 @@ INTENT_TOOLS = {
     # 가리킬 때만 명시적으로 분류되는 인텐트다 — 첨부된 이력서는 더 이상 인텐트를
     # 덮어쓰지 않고, resume_market으로 분류됐을 때만 컨텍스트로 쓰인다.
     "resume_market": ["resume"],
+    # K3: "넣어볼만한 공고 추천해줘" 류 — resume_coverage(커버리지 %/지원가능 건수)나
+    # resume_gap(부족 스킬 목록)과 달리 실제로 지원해볼 만한 "구체적인 공고 목록"을
+    # 원하는 요청이다. 프론트가 카드로 렌더링할 수 있도록 posting id를 들고 다닌다.
+    "resume_recommend": ["resume"],
 }
 
 _COOCCUR_KW = ("같이", "함께", "동반", "궁합", "짝", "with", "together", "pair", "combo")
@@ -61,6 +65,35 @@ _RESUME_MARKET_REF_KW = ("내 이력서", "제 이력서", "내 경쟁력", "내
 _RESUME_MARKET_COMBO_KW = ("분석", "평가", "어때", "적합", "시장", "비교", "경쟁력", "수준")
 # 단독으로도 "본인 이력서를 시장과 견준다"는 의미가 분명한 문구.
 _RESUME_MARKET_STANDALONE_KW = ("시장 적합도", "내 경쟁력")
+# resume_recommend: "구체적인 공고를 추천/제안해달라"는 행위 동사. resume_coverage의
+# _RESUME_COVERAGE_COMBO_KW와 "맞는 공고"가 겹치지만, 여기서는 항상 아래 REF_KW(이력서를
+# 가리키는 넓은 지칭)와 결합됐을 때만 트리거하는 combo 전용 패턴이라 오탐 폭이 좁다.
+_RESUME_RECOMMEND_ACTION_KW = ("넣어볼만한", "지원할만한", "지원해볼", "어울리는 공고", "맞는 공고", "추천")
+# _RESUME_STRONG_KW("내 이력서"/"제 이력서")보다 넓게 "이력서"라는 단어 자체(예: "이 이력서로")와
+# "내 스킬"/"내 기술"까지 포함한다 — "이 이력서로 넣어볼만한 공고 추천해줘"처럼 "내"가 아니라
+# "이"로 지칭하는 문장도 포착해야 하기 때문이다.
+_RESUME_RECOMMEND_REF_KW = ("이력서", "내 스킬", "내 기술")
+
+# 지역 토큰 -> posting.region_city/region_district에 대한 안전한 ILIKE 부분 문자열.
+# 더 구체적인(구/동 단위) 토큰을 먼저 두어 "서울 강남" 같은 문장에서 더 좁은 지역이
+# 우선 매칭되게 한다. 매칭되는 토큰이 없으면 None(필터 없음 — 0건으로 단정하지 않는다).
+_REGION_TOKENS: dict[str, str] = {
+    "강남": "강남",
+    "판교": "판교",
+    "분당": "분당",
+    "성남": "성남",
+    "여의도": "여의도",
+    "잠실": "잠실",
+    "구로": "구로",
+    "마포": "마포",
+    "종로": "종로",
+    "서울": "서울",
+    "인천": "인천",
+    "부산": "부산",
+    "대구": "대구",
+    "대전": "대전",
+    "광주": "광주",
+}
 
 _ENTRY_LEVEL_KW = (
     "신입",
@@ -78,7 +111,8 @@ _PLANNER_SYSTEM = (
     "Classify the user question into exactly one intent and extract entities. "
     "Return ONLY JSON: {\"intent\": one of "
     "[cooccurrence, skill_demand, skill_ranking, compare, concept_ranking, cert_ranking, "
-    "semantic_search, overview, region_distribution, resume_gap, resume_coverage, resume_market], "
+    "semantic_search, overview, region_distribution, resume_gap, resume_coverage, resume_market, "
+    "resume_recommend], "
     "\"skill\": <a single tech name mentioned or null>, "
     "\"skills\": <list of tech names when comparing multiple techs, else []>, "
     "\"pool\": <domestic|global|null>, "
@@ -107,6 +141,12 @@ _PLANNER_SYSTEM = (
     "(resume_coverage). Only use resume_market when the question explicitly references the "
     "user's OWN resume/competitiveness, never for generic market questions like '리액트 수요 "
     "어때' even if a resume happens to be attached. "
+    "resume_recommend = the question explicitly references the user's OWN resume/skills and "
+    "asks to RECOMMEND or FIND specific job postings that fit them, expecting an actual LIST of "
+    "postings back (e.g. 이 이력서로 넣어볼만한 공고 추천해줘, 내 스킬에 맞는 공고 추천해줘, "
+    "지원할만한 공고 찾아줘). This is different from resume_coverage, which answers with a "
+    "coverage percentage or an apply-count STAT, not a list of named postings — use "
+    "resume_recommend whenever the user wants concrete postings suggested, not a number. "
     "overview = general market summary. "
     "job_category = the job function/role the question targets (e.g. backend, frontend, "
     "data engineer, data scientist, data analyst, machine learning, AI, security, game, QA, "
@@ -150,6 +190,17 @@ def _detect_job_category(text_: str | None) -> str | None:
     직군 토큰이 surface마다 다르게 해석되는 일이 없기 때문이다.
     """
     return resolve_job_category(text_)
+
+
+def _detect_region(text_: str | None) -> str | None:
+    """질문에 등장하는 지역 토큰을 찾는다(_REGION_TOKENS 참고). LLM 없이 순수 텍스트
+    매칭이라 heuristic/LLM 플랜 경로 양쪽에서 그대로 재사용한다."""
+    if not text_:
+        return None
+    for kw, token in _REGION_TOKENS.items():
+        if kw in text_:
+            return token
+    return None
 
 
 def _detect_entry_level(text_: str | None) -> bool:
@@ -196,6 +247,24 @@ def _heuristic(session: Session, q: str, pool: str | None) -> Plan:
     has_market_ref = any(k in q for k in _RESUME_MARKET_REF_KW)
     has_market_combo = has_market_ref and any(k in low for k in _RESUME_MARKET_COMBO_KW)
     has_market_standalone = any(k in q for k in _RESUME_MARKET_STANDALONE_KW)
+    # resume_recommend는 "추천해줘"류 행위 동사 + 이력서 지칭이 함께 있을 때만 분류한다
+    # (combo 전용, standalone 없음) — 다른 resume 분기보다 먼저 확인해 "맞는 공고"/"추천"이
+    # resume_coverage 콤보 키워드와 겹치는 경우에도 실제로 "목록을 달라"는 요청 쪽을 우선시한다.
+    has_recommend_ref = any(k in q for k in _RESUME_RECOMMEND_REF_KW)
+    has_recommend_action = any(k in q for k in _RESUME_RECOMMEND_ACTION_KW)
+    if has_recommend_ref and has_recommend_action:
+        intent = "resume_recommend"
+        entities = _build_entities(skill, job_category, entry_level)
+        region = _detect_region(q)
+        if region:
+            entities["region"] = region
+        return Plan(
+            intent=intent,
+            tools=INTENT_TOOLS[intent],
+            pool=pool,
+            entities=entities,
+            subqueries=[q],
+        )
     if has_gap_standalone or has_gap_combo:
         intent = "resume_gap"
         return Plan(
@@ -297,6 +366,10 @@ def plan(session: Session, llm: LLMClient, question: str, pool: str | None) -> t
     entities = _build_entities(skill, job_category, entry_level)
     if intent == "compare" and skills_multi:
         entities["skills"] = skills_multi
+    if intent == "resume_recommend":
+        region = _detect_region(question)
+        if region:
+            entities["region"] = region
     return (
         Plan(
             intent=intent,
