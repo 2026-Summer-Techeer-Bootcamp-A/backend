@@ -25,6 +25,15 @@ INTENT_TOOLS = {
     "semantic_search": ["vector"],
     "overview": ["sql"],
     "region_distribution": ["sql"],
+    "resume_gap": ["resume"],
+    "resume_coverage": ["resume"],
+    # K2 버그 수정: 이전에는 이력서가 첨부돼 있으면 텍스트 인텐트와 무관하게 무조건
+    # resume_market으로 가로챘다(pipeline._dispatch 세 번째 분기) — "React 수요 어때?"
+    # 처럼 이력서와 무관한 질문에도 이력서-시장 비교로 답해버리는 오탐이었다. 이제
+    # resume_market은 텍스트가 실제로 "내 이력서를 시장과 비교/분석/평가해줘" 류를
+    # 가리킬 때만 명시적으로 분류되는 인텐트다 — 첨부된 이력서는 더 이상 인텐트를
+    # 덮어쓰지 않고, resume_market으로 분류됐을 때만 컨텍스트로 쓰인다.
+    "resume_market": ["resume"],
 }
 
 _COOCCUR_KW = ("같이", "함께", "동반", "궁합", "짝", "with", "together", "pair", "combo")
@@ -34,6 +43,25 @@ _CONCEPT_KW = ("개념", "패러다임", "트렌드", "msa", "마이크로서비
 _CERT_KW = ("자격증", "자격", "cert", "토익", "정보처리")
 _RANK_KW = ("순위", "많이", "상위", "top", "인기", "가장", "수요")
 _REGION_KW = ("어디", "위치", "지역", "몰려", "밀집")
+# 사용자 본인 이력서를 가리키는 강한 신호 — 이 키워드가 있으면 다른 인텐트보다 우선해
+# resume_gap/resume_coverage로 분류한다(첨부된 이력서 없이는 pipeline이 조기 안내한다).
+_RESUME_STRONG_KW = ("내 이력서", "제 이력서", "내 커버리지", "제 커버리지")
+# 단독으로도 이력서 갭/커버리지 질문임이 분명한 키워드.
+_RESUME_GAP_STANDALONE_KW = ("부족한 스킬", "부족한 기술", "뭘 배워야", "모자란")
+_RESUME_COVERAGE_STANDALONE_KW = ("지원 가능", "지원할 수 있", "갈 수 있는 공고")
+# "얼마나"/"커버리지" 등은 흔한 일반 단어라(예: "이 기술 요구 공고 얼마나 있어?") 단독으로는
+# 오탐이 나기 쉽다 — _RESUME_STRONG_KW로 본인 이력서 언급이 확인된 문장에서만 보조 신호로 쓴다.
+_RESUME_GAP_COMBO_KW = ("부족", "갭")
+_RESUME_COVERAGE_COMBO_KW = ("커버리지", "맞는 공고", "얼마나")
+# resume_market 전용 본인-이력서 신호. gap/coverage용 _RESUME_STRONG_KW보다 넓게
+# "내 경쟁력"/"내 수준"까지 포함한다 — "내 경쟁력 어때?"처럼 이력서라는 단어 없이도
+# 본인 역량을 시장과 견주는 질문이 흔하기 때문이다.
+_RESUME_MARKET_REF_KW = ("내 이력서", "제 이력서", "내 경쟁력", "내 수준")
+# 시장/분석 계열 단어 — _RESUME_MARKET_REF_KW와 결합했을 때만 resume_market으로 분류한다
+# (단독으로는 "React 시장 어때?"처럼 이력서와 무관한 질문에도 흔히 등장해 오탐이 나기 쉽다).
+_RESUME_MARKET_COMBO_KW = ("분석", "평가", "어때", "적합", "시장", "비교", "경쟁력", "수준")
+# 단독으로도 "본인 이력서를 시장과 견준다"는 의미가 분명한 문구.
+_RESUME_MARKET_STANDALONE_KW = ("시장 적합도", "내 경쟁력")
 
 # 직군 키워드 -> posting_category.category에 대한 안전한 ILIKE 부분 문자열 토큰.
 # 실제 DB의 category 값(예: "서버/백엔드 개발자", "데이터엔지니어", "빅데이터·AI(인공지능)",
@@ -83,7 +111,7 @@ _PLANNER_SYSTEM = (
     "Classify the user question into exactly one intent and extract entities. "
     "Return ONLY JSON: {\"intent\": one of "
     "[cooccurrence, skill_demand, skill_ranking, compare, concept_ranking, cert_ranking, "
-    "semantic_search, overview, region_distribution], "
+    "semantic_search, overview, region_distribution, resume_gap, resume_coverage, resume_market], "
     "\"skill\": <a single tech name mentioned or null>, "
     "\"skills\": <list of tech names when comparing multiple techs, else []>, "
     "\"pool\": <domestic|global|null>, "
@@ -96,6 +124,22 @@ _PLANNER_SYSTEM = (
     "cert_ranking = certifications. "
     "semantic_search = find/recommend postings similar to a free-form description. "
     "region_distribution = where postings are concentrated geographically (region/location). "
+    "resume_gap = the question explicitly references the user's OWN resume/skills "
+    "(e.g. 내 이력서, 제 이력서) and asks what skills THEY are missing/lacking compared to "
+    "market demand (e.g. 내 이력서 기준 부족한 스킬 뭐야, 부족한 기술이 뭐야). "
+    "resume_coverage = the question explicitly references the user's OWN resume "
+    "(e.g. 내 이력서, 제 이력서, 내 커버리지) and asks how many postings they could apply to, "
+    "or their skill coverage/match rate against the market (e.g. 내 이력서로 지원 가능한 공고 "
+    "얼마나 돼, 내 커버리지 어때). If the question clearly references the user's own resume "
+    "but it's ambiguous whether they want gap or coverage, classify as resume_coverage. "
+    "Only use resume_gap/resume_coverage when the question is about the user's OWN resume, "
+    "never for generic market questions. "
+    "resume_market = the question asks to analyze/evaluate the user's OWN resume against "
+    "the market as a whole (e.g. 내 이력서를 시장과 비교해줘, 내 경쟁력 어때, 내 이력서 시장 "
+    "적합도 어때) rather than asking specifically for a gap list (resume_gap) or an apply-count "
+    "(resume_coverage). Only use resume_market when the question explicitly references the "
+    "user's OWN resume/competitiveness, never for generic market questions like '리액트 수요 "
+    "어때' even if a resume happens to be attached. "
     "overview = general market summary. "
     "job_category = the job function/role the question targets (e.g. backend, frontend, "
     "data engineer, data scientist, data analyst, machine learning, AI, security, game, QA, "
@@ -170,6 +214,62 @@ def _heuristic(session: Session, q: str, pool: str | None) -> Plan:
     skill = _detect_skill(session, q)
     job_category = _detect_job_category(q)
     entry_level = _detect_entry_level(q)
+
+    # "내 이력서"/"제 커버리지" 같은 강한 본인-이력서 신호가 있거나 부족/갭·커버리지
+    # 키워드가 있으면, 다른 인텐트보다 우선해 resume_gap/resume_coverage/resume_market으로
+    # 분류한다. 구체적인 신호(부족한 스킬 목록 vs 지원 가능 목록 vs 시장 비교/분석)부터
+    # 순서대로 확인하고, 그 무엇에도 안 걸리면(강한 신호만 있는 포괄적 질문) coverage를
+    # 기본값으로 둔다 — "내 이력서 어때?" 류의 질문은 "지원 가능 범위"로 답하는 편이 더
+    # 유용하기 때문이다.
+    has_resume_ref = any(k in q for k in _RESUME_STRONG_KW)
+    has_gap_standalone = any(k in low for k in _RESUME_GAP_STANDALONE_KW)
+    has_coverage_standalone = any(k in low for k in _RESUME_COVERAGE_STANDALONE_KW)
+    has_gap_combo = has_resume_ref and any(k in low for k in _RESUME_GAP_COMBO_KW)
+    has_coverage_combo = has_resume_ref and any(k in low for k in _RESUME_COVERAGE_COMBO_KW)
+    # resume_market: "내 이력서"/"제 이력서"/"내 경쟁력"/"내 수준" 같은 본인-이력서 신호가
+    # 시장/분석 계열 단어와 결합됐거나, 그 자체로 명확한 단독 문구일 때만 분류한다 —
+    # 이력서가 첨부돼 있다는 사실만으로는 절대 트리거하지 않는다(그건 pipeline._dispatch가
+    # p.intent == "resume_market"일 때만 첨부를 컨텍스트로 쓰도록 별도로 보장한다).
+    has_market_ref = any(k in q for k in _RESUME_MARKET_REF_KW)
+    has_market_combo = has_market_ref and any(k in low for k in _RESUME_MARKET_COMBO_KW)
+    has_market_standalone = any(k in q for k in _RESUME_MARKET_STANDALONE_KW)
+    if has_gap_standalone or has_gap_combo:
+        intent = "resume_gap"
+        return Plan(
+            intent=intent,
+            tools=INTENT_TOOLS[intent],
+            pool=pool,
+            entities=_build_entities(skill, job_category, entry_level),
+            subqueries=[q],
+        )
+    if has_coverage_standalone or has_coverage_combo:
+        intent = "resume_coverage"
+        return Plan(
+            intent=intent,
+            tools=INTENT_TOOLS[intent],
+            pool=pool,
+            entities=_build_entities(skill, job_category, entry_level),
+            subqueries=[q],
+        )
+    if has_market_standalone or has_market_combo:
+        intent = "resume_market"
+        return Plan(
+            intent=intent,
+            tools=INTENT_TOOLS[intent],
+            pool=pool,
+            entities=_build_entities(skill, job_category, entry_level),
+            subqueries=[q],
+        )
+    if has_resume_ref:
+        intent = "resume_coverage"
+        return Plan(
+            intent=intent,
+            tools=INTENT_TOOLS[intent],
+            pool=pool,
+            entities=_build_entities(skill, job_category, entry_level),
+            subqueries=[q],
+        )
+
     if any(k in low for k in _COMPARE_KW):
         skills_multi = _detect_skills_multi(session, q)
         if len(skills_multi) >= 2:

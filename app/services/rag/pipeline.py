@@ -26,7 +26,7 @@ from app.services.rag.schemas import (
     ToolResult,
 )
 from app.services.rag.synthesis import synthesize
-from app.services.rag.tools import graph_tool, sql_tool, vector_tool
+from app.services.rag.tools import compare_tool, graph_tool, resume_tool, sql_tool, vector_tool
 
 
 def _confidence_level(n: int) -> int:
@@ -41,7 +41,13 @@ def _confidence_level(n: int) -> int:
     return 5
 
 
-def _dispatch(session: Session, p: Plan, verbose: bool = False) -> tuple[list[dict], bool]:
+def _dispatch(
+    session: Session,
+    p: Plan,
+    verbose: bool = False,
+    owned_skill_ids: set[int] | None = None,
+    posting_ids: list[int] | None = None,
+) -> tuple[list[dict], bool]:
     """intent에 따라 도구를 실행하고 (tool_output 리스트, fell_back)을 반환.
 
     fell_back=True는 "질문이 겨냥한 대상과 실제로 답한 대상이 다르다"는 뜻이다 — 즉
@@ -63,6 +69,36 @@ def _dispatch(session: Session, p: Plan, verbose: bool = False) -> tuple[list[di
         if result is not None:
             result["duration_ms"] = round((time.perf_counter() - start) * 1000, 1)
         return result
+
+    # 첨부(공고/이력서)는 텍스트 인텐트보다 우선하는 명시적 신호다(K2) — 공고를 2개
+    # 이상 첨부하거나, 이력서와 공고를 함께 첨부한 경우는 첨부 자체가 "이걸 비교해줘"라는
+    # 뜻이 명확하므로 아래 텍스트 인텐트 분기보다 먼저 처리하고 조기 반환한다.
+    # 도구가 대상을 못 찾아 None을 반환해도(예: 삭제된 공고 id) 여기서는 top_skills로
+    # 대체하지 않는다 — run_chat_events가 tool_outputs가 빈 것을 보고 "비교 대상을
+    # 찾지 못했다"는 안내로 조기 종료하므로, fell_back=False로 그대로 반환한다.
+    #
+    # 세 번째 분기(이력서만 첨부, 공고는 없음)는 예전엔 "resume_gap/resume_coverage가
+    # 아니면 무조건 resume_market"이었다 — 이력서를 첨부해 놓고 "React 수요 어때?"를
+    # 물어도 resume_market으로 가로채 버리는 오탐 버그였다(K2 이후 발견). 이제는
+    # router.py가 텍스트에서 명시적으로 resume_market을 분류했을 때만(=사용자가 실제로
+    # "내 이력서를 시장과 비교/분석해줘" 류를 물었을 때만) 이 분기를 탄다. 그 외의
+    # 일반 시장 인텐트(skill_ranking/skill_demand/...)는 아래 텍스트 인텐트 분기로
+    # 그대로 흘러가 실제 질문에 답하고, 첨부된 이력서는 그 턴에서는 그냥 무시된다.
+    if posting_ids and len(posting_ids) >= 2:
+        r = _run(compare_tool.posting_posting_compare, session, posting_ids[0], posting_ids[1])
+        if r:
+            out.append(r)
+        return out, False
+    elif owned_skill_ids and posting_ids:
+        r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, posting_ids[0])
+        if r:
+            out.append(r)
+        return out, False
+    elif owned_skill_ids and not posting_ids and p.intent == "resume_market":
+        r = _run(compare_tool.resume_market, session, owned_skill_ids, pool, category)
+        if r:
+            out.append(r)
+        return out, False
 
     if p.intent == "cooccurrence" and skill:
         r = _run(graph_tool.co_occurring_skills, session, skill, pool, verbose=verbose)
@@ -87,7 +123,23 @@ def _dispatch(session: Session, p: Plan, verbose: bool = False) -> tuple[list[di
     elif p.intent == "cert_ranking":
         out.append(_run(sql_tool.top_certs, session, pool, category=category, entry_level=entry_level, verbose=verbose))
     elif p.intent == "region_distribution":
-        out.append(_run(sql_tool.top_locations, session, pool, verbose=verbose))
+        out.append(_run(sql_tool.top_locations, session, pool, category=category, verbose=verbose))
+    elif p.intent == "resume_gap":
+        r = _run(resume_tool.resume_gap, session, owned_skill_ids, pool, category=category)
+        if r:
+            out.append(r)
+    elif p.intent == "resume_coverage":
+        r = _run(resume_tool.resume_coverage, session, owned_skill_ids, pool, category=category)
+        if r:
+            out.append(r)
+    elif p.intent == "skill_ranking":
+        # 이전에는 skill_ranking 전용 분기가 없어 모든 "상위 기술" 질문이 아래 폴백
+        # 분기로 떨어졌다 — 그 결과 fell_back=True로 오판되어 정상 랭킹 질문인데도
+        # 신뢰도가 상한 2로 깎이고 "대체됨"으로 표시되는 버그가 있었다. 실제 겨냥한
+        # intent를 그대로 answering하도록 명시적으로 분기한다.
+        r = _run(sql_tool.top_skills, session, pool, category=category, entry_level=entry_level, verbose=verbose)
+        if r:
+            out.append(r)
 
     used_fallback_branch = not out
     if used_fallback_branch:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
@@ -117,6 +169,8 @@ def run_chat_events(
     *,
     verbose: bool = False,
     collect: dict[str, Any] | None = None,
+    owned_skill_ids: set[int] | None = None,
+    posting_ids: list[int] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """SSE 계약과 정확히 같은 모양의 이벤트를 순서대로 yield한다.
 
@@ -173,8 +227,67 @@ def run_chat_events(
             "debug": plan_llm_debug,
         }
 
-        tool_outputs, fell_back = _dispatch(session, p, verbose=verbose)
+        # 이력서 기준 질문인데 첨부된 이력서(owned_skill_ids)가 없으면 도구를 실행하지도,
+        # 일반 랭킹으로 대체하지도 않는다 — 이력서 없이 "부족한 스킬"/"시장 적합도"를
+        # 답하면 근거 없는 거짓 답이 되기 때문이다. 여기서 바로 안내 문구로 조기 종료한다.
+        # resume_market도 resume_gap/resume_coverage와 마찬가지로 이력서 없이는 성립할
+        # 수 없는 질문이라 같은 취급을 한다(_dispatch의 세 번째 분기도 owned_skill_ids가
+        # 없으면 애초에 안 타므로, 여기서 걸러주지 않으면 무관한 top_skills로 새어나간다).
+        if p.intent in ("resume_gap", "resume_coverage", "resume_market") and not owned_skill_ids:
+            answer = (
+                "이력서를 먼저 첨부해 주세요. 첨부하면 이력서 기준으로 부족한 기술과 "
+                "지원 가능한 공고를 분석해 드려요."
+            )
+            degraded_reasons = ["이력서가 첨부되지 않아 이력서 기준 분석을 할 수 없어요"]
+            total_ms = round((time.perf_counter() - pipeline_start) * 1000, 1)
+            collect["answer"] = answer
+            collect["citations"] = []
+            collect["tool_results"] = []
+            collect["confidence"] = Confidence(level=0, n=0)
+            collect["degraded"] = True
+            collect["degraded_reasons"] = degraded_reasons
+            collect["total_duration_ms"] = total_ms
+            yield {
+                "type": "final",
+                "answer": answer,
+                "citations": [],
+                "confidence": {"level": 0, "n": 0},
+                "degraded": True,
+                "degraded_reasons": degraded_reasons,
+                "total_duration_ms": total_ms,
+            }
+            return
+
+        tool_outputs, fell_back = _dispatch(
+            session, p, verbose=verbose, owned_skill_ids=owned_skill_ids, posting_ids=posting_ids
+        )
         collect["tool_outputs"] = tool_outputs
+
+        # 첨부 기반 비교(공고 2개 비교, 이력서-공고 비교)를 시도했는데 대상 공고를 찾지
+        # 못하면(삭제됐거나 잘못된 id) _dispatch는 top_skills로 대체하지 않고 빈 채로
+        # 반환한다 — 여기서도 그 빈 상태를 일반 랭킹/합성으로 흘려보내지 않고 바로
+        # 안내 문구로 조기 종료한다(위 이력서 미첨부 조기 종료와 동일한 스타일).
+        if not tool_outputs and posting_ids:
+            answer = "비교할 공고를 찾지 못했어요. 첨부한 공고 정보를 다시 확인해 주세요."
+            degraded_reasons = ["첨부한 공고를 찾지 못해 비교 결과를 만들 수 없어요"]
+            total_ms = round((time.perf_counter() - pipeline_start) * 1000, 1)
+            collect["answer"] = answer
+            collect["citations"] = []
+            collect["tool_results"] = []
+            collect["confidence"] = Confidence(level=0, n=0)
+            collect["degraded"] = True
+            collect["degraded_reasons"] = degraded_reasons
+            collect["total_duration_ms"] = total_ms
+            yield {
+                "type": "final",
+                "answer": answer,
+                "citations": [],
+                "confidence": {"level": 0, "n": 0},
+                "degraded": True,
+                "degraded_reasons": degraded_reasons,
+                "total_duration_ms": total_ms,
+            }
+            return
 
         # 계획(route)과 실제로 답을 만든 도구가 다를 수 있다 — 예: semantic_search로
         # 계획했는데 임베더가 죽어 vector_tool이 None을 반환하면 _dispatch는 조용히
@@ -301,9 +414,25 @@ def run_chat_events(
         yield {"type": "error", "message": str(exc)}
 
 
-def run_chat(session: Session, question: str, pool: str | None = None, *, verbose: bool = False) -> ChatResponse:
+def run_chat(
+    session: Session,
+    question: str,
+    pool: str | None = None,
+    *,
+    verbose: bool = False,
+    owned_skill_ids: set[int] | None = None,
+    posting_ids: list[int] | None = None,
+) -> ChatResponse:
     collect: dict[str, Any] = {}
-    for _event in run_chat_events(session, question, pool, verbose=verbose, collect=collect):
+    for _event in run_chat_events(
+        session,
+        question,
+        pool,
+        verbose=verbose,
+        collect=collect,
+        owned_skill_ids=owned_skill_ids,
+        posting_ids=posting_ids,
+    ):
         pass  # 이벤트는 스트리밍 전용 — 비스트리밍 조립은 collect로 한다
 
     if "exception" in collect:

@@ -255,6 +255,145 @@ def calculate_coverage_response(
         sample_warning=sample_size < 50,
     )
 
+def _dedupe_sorted_ci(names: list[str]) -> list[str]:
+    """대소문자만 다른 중복 스킬명을 하나로 합치고(먼저 나온 표기를 채택), 결과 순서가
+    호출마다 흔들리지 않도록 소문자 기준으로 안정 정렬한다. DB 접근이 없는 순수 함수라
+    단위테스트로 집합 연산만 따로 검증할 수 있다."""
+    seen: dict[str, str] = {}
+    for name in names:
+        key = name.lower()
+        if key not in seen:
+            seen[key] = name
+    return sorted(seen.values(), key=str.lower)
+
+
+def get_posting_skill_names(session: Session, posting_id: int) -> tuple[str, list[str]]:
+    """공고 제목과 요구 기술 정규명 목록(중복 제거·정렬)을 반환한다. posting_tech -> skill
+    조인은 app/crud/posting.py get_similar_postings가 쓰는 패턴을 그대로 재사용한다.
+    공고가 없거나 삭제됐으면 404 — 호출부(compare_tool)에서 그 예외를 잡아 '비교할 공고를
+    찾지 못했어요' 같은 안내로 바꿔 쓴다."""
+    title = session.scalar(
+        select(Posting.title).where(
+            Posting.id == posting_id,
+            Posting.is_deleted.is_(False),
+        )
+    )
+    if title is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="posting not found")
+
+    rows = session.scalars(
+        select(Skill.canonical)
+        .join(PostingTech, PostingTech.skill_id == Skill.id)
+        .where(
+            PostingTech.posting_id == posting_id,
+            PostingTech.is_deleted.is_(False),
+            Skill.is_deleted.is_(False),
+        )
+    ).all()
+
+    return title, _dedupe_sorted_ci(list(rows))
+
+
+def _build_resume_posting_compare(
+    *,
+    resume_title: str,
+    posting_title: str,
+    owned_names: list[str],
+    posting_skills: list[str],
+) -> dict:
+    """이력서 보유 기술과 공고 요구 기술의 겹침/부족/여분을 순수 집합 연산으로 계산한다.
+    DB 세션이 필요 없는 형태로 분리해 단위테스트가 쉽게 만들었다."""
+    owned_by_key = {name.lower(): name for name in owned_names}
+    posting_by_key = {name.lower(): name for name in posting_skills}
+    owned_keys = set(owned_by_key)
+    posting_keys = set(posting_by_key)
+
+    matched = _dedupe_sorted_ci([posting_by_key[k] for k in owned_keys & posting_keys])
+    missing = _dedupe_sorted_ci([posting_by_key[k] for k in posting_keys - owned_keys])
+    extra = _dedupe_sorted_ci([owned_by_key[k] for k in owned_keys - posting_keys])
+
+    coverage_pct = round(100 * len(matched) / len(posting_keys), 1) if posting_keys else 0.0
+
+    return {
+        "resume_title": resume_title,
+        "posting_title": posting_title,
+        "coverage_pct": coverage_pct,
+        "matched_skills": matched,
+        "missing_skills": missing,
+        "extra_skills": extra,
+    }
+
+
+def compare_resume_to_posting(
+    session: Session,
+    *,
+    owned_skill_ids: set[int],
+    posting_id: int,
+) -> dict:
+    """이력서 보유 기술 vs 공고 요구 기술 딥 비교(K2). 공고가 없으면 get_posting_skill_names가
+    404를 던진다 — 여기서 잡지 않고 그대로 올려보내 호출부(compare_tool)가 '공고 없음'과
+    '이력서 없음'을 구분해 처리하게 한다."""
+    posting_title, posting_skills = get_posting_skill_names(session, posting_id)
+
+    owned_names: list[str] = []
+    if owned_skill_ids:
+        owned_names = list(
+            session.scalars(
+                select(Skill.canonical).where(
+                    Skill.id.in_(owned_skill_ids),
+                    Skill.is_deleted.is_(False),
+                )
+            ).all()
+        )
+
+    return _build_resume_posting_compare(
+        resume_title="내 이력서",
+        posting_title=posting_title,
+        owned_names=owned_names,
+        posting_skills=posting_skills,
+    )
+
+
+def _build_posting_posting_compare(
+    *,
+    title_a: str,
+    skills_a: list[str],
+    title_b: str,
+    skills_b: list[str],
+) -> dict:
+    """두 공고 요구 기술의 겹침/차이를 순수 집합 연산으로 계산한다(DB 세션 불필요)."""
+    a_by_key = {name.lower(): name for name in skills_a}
+    b_by_key = {name.lower(): name for name in skills_b}
+    a_keys, b_keys = set(a_by_key), set(b_by_key)
+
+    shared = _dedupe_sorted_ci([a_by_key[k] for k in a_keys & b_keys])
+    only_a = _dedupe_sorted_ci([a_by_key[k] for k in a_keys - b_keys])
+    only_b = _dedupe_sorted_ci([b_by_key[k] for k in b_keys - a_keys])
+
+    return {
+        "postingA": title_a,
+        "postingB": title_b,
+        "shared": shared,
+        "onlyA": only_a,
+        "onlyB": only_b,
+    }
+
+
+def compare_two_postings(
+    session: Session,
+    *,
+    posting_id_a: int,
+    posting_id_b: int,
+) -> dict:
+    """공고 vs 공고 요구 기술 딥 비교(K2). 둘 중 하나라도 없으면 get_posting_skill_names가
+    404를 던지며 그대로 전파된다."""
+    title_a, skills_a = get_posting_skill_names(session, posting_id_a)
+    title_b, skills_b = get_posting_skill_names(session, posting_id_b)
+    return _build_posting_posting_compare(
+        title_a=title_a, skills_a=skills_a, title_b=title_b, skills_b=skills_b
+    )
+
+
 def get_pool_as_of(
     session: Session,
     *,
