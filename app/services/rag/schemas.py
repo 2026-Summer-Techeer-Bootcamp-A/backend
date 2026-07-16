@@ -44,6 +44,12 @@ class ToolResultItem(BaseModel):
     name: str
     metric: str | None = None
     pct: float | None = None
+    # K3: 공고를 목록으로 반환하는 kind="posting_list"에서만 채워진다 — 프론트가 이
+    # 필드들로 클릭 가능한 공고 카드(상세보기 링크, 북마크)를 렌더링한다. 그 외 kind
+    # (list/stat/...)에서는 항상 None이라 기존 계약을 깨지 않는다.
+    id: int | None = None
+    company: str | None = None
+    pool: str | None = None
 
 
 class ToolResult(BaseModel):
@@ -58,6 +64,9 @@ class ToolResult(BaseModel):
         "resume_posting",
         "posting_posting",
         "resume_market",
+        # K3: 실제 공고 목록(이력서 추천, 의미 유사 검색) — items 각각이 posting id를
+        # 들고 있어 프론트가 통계 막대그래프 대신 클릭 가능한 공고 카드로 렌더링한다.
+        "posting_list",
     ]
     label: str
     items: list[ToolResultItem] = []

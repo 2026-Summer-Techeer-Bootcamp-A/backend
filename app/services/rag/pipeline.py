@@ -132,6 +132,11 @@ def _dispatch(
         r = _run(resume_tool.resume_coverage, session, owned_skill_ids, pool, category=category)
         if r:
             out.append(r)
+    elif p.intent == "resume_recommend":
+        region = p.entities.get("region")
+        r = _run(resume_tool.resume_recommend, session, owned_skill_ids, pool, region=region)
+        if r:
+            out.append(r)
     elif p.intent == "skill_ranking":
         # 이전에는 skill_ranking 전용 분기가 없어 모든 "상위 기술" 질문이 아래 폴백
         # 분기로 떨어졌다 — 그 결과 fell_back=True로 오판되어 정상 랭킹 질문인데도
@@ -233,7 +238,10 @@ def run_chat_events(
         # resume_market도 resume_gap/resume_coverage와 마찬가지로 이력서 없이는 성립할
         # 수 없는 질문이라 같은 취급을 한다(_dispatch의 세 번째 분기도 owned_skill_ids가
         # 없으면 애초에 안 타므로, 여기서 걸러주지 않으면 무관한 top_skills로 새어나간다).
-        if p.intent in ("resume_gap", "resume_coverage", "resume_market") and not owned_skill_ids:
+        if (
+            p.intent in ("resume_gap", "resume_coverage", "resume_market", "resume_recommend")
+            and not owned_skill_ids
+        ):
             answer = (
                 "이력서를 먼저 첨부해 주세요. 첨부하면 이력서 기준으로 부족한 기술과 "
                 "지원 가능한 공고를 분석해 드려요."

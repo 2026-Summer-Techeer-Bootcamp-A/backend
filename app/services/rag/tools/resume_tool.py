@@ -11,8 +11,12 @@ owned_skill_ids가 비어 있으면(이력서 미첨부 혹은 기술 미추출)
 
 from __future__ import annotations
 
+from datetime import date
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.posting import Posting, PostingTech
 from app.services.match import (
     calculate_coverage_response,
     calculate_gap_response,
@@ -144,5 +148,122 @@ def resume_coverage(
             "label": f"{pool_label} 채용시장 {resp.sample_size:,}건 기준",
         },
         "n": resp.sample_size,
+        "facts": facts,
+    }
+
+
+def resume_recommend(
+    session: Session,
+    owned_skill_ids: set[int] | None,
+    pool: str | None = None,
+    region: str | None = None,
+    limit: int = 8,
+) -> dict | None:
+    """이력서 보유 기술과 겹치는 정도로 랭킹한, 실제로 지원해볼 만한 구체적 공고 목록(K3).
+
+    resume_coverage/resume_gap은 커버리지 %·부족 스킬 같은 통계만 답해 "넣어볼만한 공고
+    추천해줘" 류 질문에 실제 공고를 보여주지 못했다 — app/crud/posting.py
+    get_similar_postings의 스킬 겹침(overlap_count) 랭킹 패턴을 그대로 재사용해 이력서
+    보유 스킬과 posting_tech가 겹치는 공고를 뽑는다. get_similar_postings와 달리 기준이
+    되는 단일 공고가 없고(이력서 자체가 기준), region 필터가 추가로 붙는다.
+    """
+    if not owned_skill_ids:
+        return None
+
+    resolved_pool = _resolve_pool(pool)
+    pool_label = "국내" if resolved_pool == "domestic" else "해외"
+    n_owned = len(owned_skill_ids)
+
+    def _rank(with_region: bool) -> list[tuple[Posting, int]]:
+        # (posting_id, skill_id) 유니크 제약 덕분에 posting_id로 GROUP BY한 안에서는
+        # skill_id가 중복되지 않는다 — get_similar_postings와 동일한 근거로 DISTINCT 없이도
+        # overlap count가 정확하다. pool/region/마감일 필터를 걸기 전에 넉넉히 더 뽑아둬야
+        # (vector_tool.semantic_search의 fetch_limit 여유분과 같은 이유) 필터 후에도
+        # limit개를 채울 여지가 남는다.
+        fetch_limit = min(limit * 20, 200)
+        overlap_rows = session.execute(
+            select(PostingTech.posting_id, func.count(PostingTech.skill_id).label("overlap"))
+            .where(
+                PostingTech.skill_id.in_(owned_skill_ids),
+                PostingTech.is_deleted.is_(False),
+            )
+            .group_by(PostingTech.posting_id)
+            .order_by(func.count(PostingTech.skill_id).desc())
+            .limit(fetch_limit)
+        ).all()
+        overlap_map = {row.posting_id: row.overlap for row in overlap_rows}
+        if not overlap_map:
+            return []
+
+        stmt = select(Posting).where(
+            Posting.id.in_(overlap_map.keys()),
+            Posting.pool == resolved_pool,
+            Posting.is_deleted.is_(False),
+            # 마감일이 지난 공고는 추천 대상에서 제외한다(마감일 자체가 없는 상시채용은
+            # 유지) — match.py build_posting_pool_query/crud/posting.py get_similar_postings와
+            # 동일한 기준.
+            Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
+        )
+        if with_region and region:
+            # ORM .ilike()를 써야 sqlite(CI)에서도 컴파일된다 — raw SQL ILIKE는
+            # Postgres 전용 연산자라 sqlite에서 문법 에러가 난다.
+            stmt = stmt.where(
+                Posting.region_city.ilike(f"%{region}%")
+                | Posting.region_district.ilike(f"%{region}%")
+            )
+        postings = session.execute(stmt).scalars().unique().all()
+        ranked = [(p, overlap_map[p.id]) for p in postings]
+        ranked.sort(key=lambda pair: pair[1], reverse=True)
+        return ranked[:limit]
+
+    region_fallback = False
+    results = _rank(with_region=True) if region else _rank(with_region=False)
+    if region and not results:
+        # 지역 필터로 0건이 되면 빈 결과를 그대로 돌려주지 않고 지역 없이 다시 찾아,
+        # facts에 "지역 필터를 못 지켰다"는 사실을 정직하게 남긴다.
+        results = _rank(with_region=False)
+        region_fallback = True
+
+    if not results:
+        return None
+
+    items = []
+    for posting, overlap in results:
+        fit_pct = round(overlap / n_owned * 100, 1) if n_owned else 0.0
+        items.append(
+            {
+                "name": posting.title,
+                "metric": f"적합도 {overlap}개 일치",
+                "pct": fit_pct,
+                "id": posting.id,
+                "company": posting.company,
+                "pool": posting.pool,
+            }
+        )
+
+    if region and region_fallback:
+        region_note = f"{region} 지역에는 일치하는 공고가 없어 전체 지역으로 대신 보여드려요, "
+    elif region:
+        region_note = f"{region} 지역 기준, "
+    else:
+        region_note = ""
+
+    facts_body = "; ".join(f"{it['name']} {it['metric']}" for it in items[:5])
+    facts = f"{pool_label} 채용시장 기준 {region_note}이력서 보유 기술과 겹치는 공고 상위 — {facts_body}"
+
+    label_region = f" ({region})" if region and not region_fallback else ""
+    return {
+        "tool": "resume",
+        "tool_result": {
+            "kind": "posting_list",
+            "label": f"이력서 기반 추천 공고{label_region}",
+            "items": items,
+        },
+        "citation": {
+            "type": "resume",
+            "ref": "이력서 기반 공고 추천",
+            "label": f"{pool_label} 채용시장 기준 스킬 겹침 랭킹",
+        },
+        "n": len(items),
         "facts": facts,
     }
