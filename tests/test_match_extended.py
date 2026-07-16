@@ -1,11 +1,11 @@
 """GET /match/coverage/distribution, /match/roadmap, /match/pivot-map 테스트 (c,y1,y2)."""
 
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -13,6 +13,7 @@ from app.core.db import Base, get_session
 from app.core.security import create_access_token
 from app.main import app
 from app.models import JobCategory, Posting, PostingCategory, PostingTech, Resume, ResumeSkill, Skill, User
+from app.services.match import build_posting_pool_query
 
 
 @pytest.fixture
@@ -146,3 +147,40 @@ def test_pivot_map_rejects_invalid_kind(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {client.token}"},
     )
     assert resp.status_code == 422
+
+
+def test_build_posting_pool_query_excludes_closed_postings() -> None:
+    """시장 모수 헬퍼는 마감된 공고를 제외해야 한다(app/crud/posting.py의
+    _apply_posting_filters와 동일한 기준). 2022년처럼 오래전에 마감된 공고가
+    market 통계(스킬 점유율/커버리지 분포/gap/roadmap/pivot-map)에 섞여 들어가면
+    "지원 가능 공고" 수치와 모수 정의가 어긋난다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        open_posting = Posting(
+            source="jumpit", source_uid="open1", pool="domestic", company="Open Co",
+            title="Open Posting", post_date=date(2026, 1, 1),
+            close_date=date.today() + timedelta(days=7),
+        )
+        evergreen_posting = Posting(
+            source="jumpit", source_uid="evergreen1", pool="domestic", company="Evergreen Co",
+            title="Evergreen Posting", post_date=date(2026, 1, 1),
+            close_date=None,
+        )
+        closed_posting = Posting(
+            source="jumpit", source_uid="closed1", pool="domestic", company="Closed Co",
+            title="Closed Posting (2022)", post_date=date(2022, 1, 1),
+            close_date=date(2022, 3, 1),
+        )
+        seed.add_all([open_posting, evergreen_posting, closed_posting])
+        seed.commit()
+
+    with testing_session() as session:
+        pool_query = build_posting_pool_query(pool="domestic", position=None).subquery()
+        posting_ids = set(session.scalars(select(pool_query.c.id)).all())
+
+    # 마감된 공고(closed_posting)는 시장 모수에서 빠지고, 상시채용(close_date=None)과
+    # 아직 마감되지 않은 공고만 남아야 한다.
+    assert posting_ids == {open_posting.id, evergreen_posting.id}
