@@ -8,3 +8,4 @@ bcrypt
 rich
 questionary
 pytest-github-actions-annotate-failures
+orjson>=3.10,<4.0
