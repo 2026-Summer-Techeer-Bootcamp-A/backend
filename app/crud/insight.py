@@ -21,7 +21,7 @@ from app.models import (
     Skill,
 )
 from app.services.job_category import resolve_job_category
-from app.services.match import build_posting_pool_query, get_skill_id_by_canonical
+from app.services.match import build_posting_pool_query, get_skill_id_by_canonical, market_pool_cutoff_date
 
 # 그룹내 상대 점유(§5 group-share) 대상 스킬 세트. 프론트/백엔드/DB 그룹은 서버 상수로 고정한다.
 GROUP_SKILLS: dict[str, list[str]] = {
@@ -477,8 +477,10 @@ def get_skill_share(
                 .where(
                     Posting.pool == pool,
                     Posting.is_deleted.is_(False),
-                    # match.py build_posting_pool_query와 동일한 "지원 가능 공고" 모수 기준.
-                    Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
+                    # match.py build_posting_pool_query와 동일한 "최근 3년 이내 게시(마감
+                    # 포함)" 시장 모수 기준 — post_date가 없는 공고는 포함해서 조용히
+                    # 잃지 않는다.
+                    Posting.post_date.is_(None) | (Posting.post_date >= market_pool_cutoff_date()),
                     PostingCategory.is_deleted.is_(False),
                     PostingCategory.category.ilike(f"%{category_token}%"),
                 )

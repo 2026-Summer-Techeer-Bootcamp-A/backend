@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import Select, distinct, func, select
@@ -83,15 +83,32 @@ def get_skill_ids_from_session(
     return set(rows)
 
 
+# 시장 통계(스킬 점유율/커버리지/gap/roadmap/pivot-map/resume_market/resume_recommend)의
+# 모수 정의. 예전에는 "마감 전 공고만"이었는데, 국내 백엔드 시장에서 마감된 공고가
+# 압도적으로 많아 그 기준으로는 표본이 300여 건까지 쪼그라들어 통계적 대표성이 없었다.
+# 그래서 마감 여부와 무관하게 "최근 N년 이내 게시"로만 모수를 다시 정의한다 — 대신
+# 너무 오래된(트렌드가 바뀐 스킬을 담고 있을) 공고는 배제한다.
+MARKET_WINDOW_DAYS = 365 * 3
+
+
+def market_pool_cutoff_date() -> date:
+    """시장 모수(coverage/gap/skill-share/resume 매칭 계열)의 3년 컷오프 날짜.
+
+    윤년 경계에서 date(year-3, month, day)가 존재하지 않는 경우(2/29)를 피하려고
+    relativedelta 대신 고정 일수(365*3) timedelta를 쓴다."""
+    return date.today() - timedelta(days=MARKET_WINDOW_DAYS)
+
+
 def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
     query = select(Posting.id).where(
         Posting.pool == pool,
         Posting.is_deleted.is_(False),
-        # 마감일이 지난 공고는 시장 모수에서 제외한다(마감일 자체가 없는 상시채용은 유지).
-        # app/crud/posting.py의 _apply_posting_filters와 동일한 기준으로 맞춰서
-        # "지원 가능 공고" 수치와 시장 통계(스킬 점유율/커버리지/gap/roadmap/pivot-map)가
-        # 같은 모수를 쓰도록 한다.
-        Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
+        # "마감 전 공고만"에서 "최근 3년 이내 게시(마감 포함)"로 시장 모수를 바꿨다.
+        # app/crud/posting.py의 _apply_posting_filters(공고 목록/지원 가능 여부)와는
+        # 이제 기준이 다르다 — 그쪽은 여전히 "지금 지원 가능한 공고"를 뜻하는 별개의
+        # 개념이라 건드리지 않는다. post_date가 없는 공고(수집 당시 날짜 파싱 실패 등)를
+        # 이 필터로 조용히 잃지 않도록 NULL은 포함한다.
+        Posting.post_date.is_(None) | (Posting.post_date >= market_pool_cutoff_date()),
     )
 
     if position:
