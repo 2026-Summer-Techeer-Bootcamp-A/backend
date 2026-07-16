@@ -319,3 +319,76 @@ def test_cooccurrence_without_skill_dedupes_pairs(client: TestClient) -> None:
     assert ("Python", "Spring") in pairs
     spring_node = next(n for n in body["nodes"] if n["canonical"] == "Spring")
     assert spring_node["freq"] == 10
+
+
+# --- get_skill_share position 경로: "마감 전 공고만"에서 "최근 3년(마감 포함)"로 -------
+#
+# 위 `client` 픽스처는 sample_size가 정확한 값(2, 3 등)에 의존하는 기존 테스트가 많아
+# 새 포스팅을 더 심으면 그 테스트들이 깨진다 — 그래서 이 회귀 검증만 독립된
+# 엔진/세션으로 따로 돈다.
+
+
+@pytest.fixture
+def window_client() -> Iterator[TestClient]:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        python = Skill(canonical="Python", category="language")
+        seed.add(python)
+        seed.flush()
+
+        # 최근(3년 이내) 게시 + 열려 있음 — 항상 포함.
+        recent_open = Posting(
+            source="jumpit", source_uid="w-recent-open", pool="domestic", company="Open Co",
+            title="최근 오픈", post_date=date(2026, 1, 1), close_date=None,
+        )
+        # 최근(3년 이내) 게시 + 마감됨 — 예전엔 빠졌지만 이제는 포함되어야 한다.
+        recent_closed = Posting(
+            source="jumpit", source_uid="w-recent-closed", pool="domestic", company="Closed Co",
+            title="최근 마감", post_date=date(2026, 1, 2), close_date=date(2026, 2, 1),
+        )
+        # 3년보다 오래전 게시(2020) — 마감 여부와 무관하게 이제는 제외되어야 한다.
+        old_posting = Posting(
+            source="jumpit", source_uid="w-old", pool="domestic", company="Old Co",
+            title="오래된 공고", post_date=date(2020, 1, 1), close_date=None,
+        )
+        seed.add_all([recent_open, recent_closed, old_posting])
+        seed.commit()
+
+        seed.add_all(
+            [
+                PostingCategory(posting_id=recent_open.id, category="서버/백엔드 개발자"),
+                PostingCategory(posting_id=recent_closed.id, category="서버/백엔드 개발자"),
+                PostingCategory(posting_id=old_posting.id, category="서버/백엔드 개발자"),
+                PostingTech(posting_id=recent_open.id, skill_id=python.id),
+                PostingTech(posting_id=recent_closed.id, skill_id=python.id),
+                PostingTech(posting_id=old_posting.id, skill_id=python.id),
+            ]
+        )
+        seed.commit()
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_skill_share_position_path_includes_recent_closed_excludes_old(
+    window_client: TestClient,
+) -> None:
+    resp = window_client.get(
+        "/api/v1/stats/skill-share",
+        params={"pool": "domestic", "position": "backend"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # recent_open + recent_closed 2건만 표본 — old_posting(2020년 게시)은 3년 윈도우 밖.
+    assert body["sample_size"] == 2
+    python_item = next(item for item in body["items"] if item["canonical"] == "Python")
+    assert python_item["posting_count"] == 2
