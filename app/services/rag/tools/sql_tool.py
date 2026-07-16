@@ -253,40 +253,59 @@ def top_certs(
 
 
 def top_locations(
-    session: Session, pool: str | None = None, limit: int = 8, verbose: bool = False
+    session: Session,
+    pool: str | None = None,
+    limit: int = 8,
+    category: str | None = None,
+    verbose: bool = False,
 ) -> dict:
-    total = total_postings(session, pool)
+    total = total_postings(session, pool, category=category)
+    join = _category_join(category)
+    count_expr = "COUNT(DISTINCT p.id)" if category else "COUNT(*)"
+    extra_params = _filter_params(category)
     sql = (
-        f"SELECT p.region_district, COUNT(*) n FROM posting p "
+        f"SELECT p.region_district, {count_expr} n FROM posting p "
+        f"{join}"
         f"WHERE {_POOL_WHERE} AND p.region_district IS NOT NULL "
         f"GROUP BY p.region_district ORDER BY n DESC LIMIT :limit"
     )
     sql_start = time.perf_counter()
-    rows = _top(session, sql, pool, limit)
+    rows = _top(session, sql, pool, limit, extra_params=extra_params)
     sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
     items = [
         {"name": n, "metric": f"{c:,}건", "pct": round(100 * c / total, 1) if total else 0.0}
         for n, c in rows
     ]
-    facts = "; ".join(f"{n} {c}건({round(100 * c / total, 1) if total else 0}%)" for n, c in rows)
+    facts_body = "; ".join(f"{n} {c}건({round(100 * c / total, 1) if total else 0}%)" for n, c in rows)
+    if category:
+        label = f"지역별 공고 분포{_filter_label_suffix(category, False)}"
+        citation_label = f"지역별 집계 · 공고 {total:,}건{_filter_citation_suffix(category, False)}"
+        facts = (
+            f"pool={pool or '전체'} 직군={category} 기준(지역 정보는 국내 공고에만 있음) "
+            f"지역별 공고 분포 — {facts_body}"
+        )
+    else:
+        label = "지역별 공고 분포"
+        citation_label = f"지역별 집계 · 공고 {total:,}건"
+        facts = (
+            f"pool={pool or '전체'} 기준(지역 정보는 국내 공고에만 있음) "
+            f"지역별 공고 분포 — {facts_body}"
+        )
     debug = (
-        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit}, "sql_ms": sql_ms}
+        {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}, "sql_ms": sql_ms}
         if verbose
         else None
     )
     return {
         "tool": "sql",
-        "tool_result": {"kind": "list", "label": "지역별 공고 분포", "items": items, "debug": debug},
+        "tool_result": {"kind": "list", "label": label, "items": items, "debug": debug},
         "citation": {
             "type": "sql",
             "ref": "채용공고·지역",
-            "label": f"지역별 집계 · 공고 {total:,}건",
+            "label": citation_label,
         },
         "n": total,
-        "facts": (
-            f"pool={pool or '전체'} 기준(지역 정보는 국내 공고에만 있음) "
-            f"지역별 공고 분포 — {facts}"
-        ),
+        "facts": facts,
     }
 
 

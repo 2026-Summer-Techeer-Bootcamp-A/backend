@@ -14,6 +14,13 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     pool: Literal["domestic", "global"] | None = None
     verbose: bool = False
+    # 로그인 사용자가 찜해둔 이력서를 첨부해 질문하면(예: "내 이력서 기준 부족한 스킬 뭐야?")
+    # 라우터가 resume_gap/resume_coverage 인텐트로 기존 매치 엔진(match.py)을 재사용한다.
+    resume_id: int | None = None
+    # 공고를 1개 이상 첨부하면(예: 공고 상세에서 "이 공고와 비교" 버튼) 딥 비교 채널로
+    # 쓰인다 — resume_id와 함께 오면 이력서 vs 공고, 단독으로 2개 오면 공고 vs 공고
+    # 비교로 라우팅된다(app/services/rag/pipeline.py _dispatch 참고).
+    posting_ids: list[int] | None = None
 
 
 class Plan(BaseModel):
@@ -40,13 +47,28 @@ class ToolResultItem(BaseModel):
 
 
 class ToolResult(BaseModel):
-    kind: Literal["list", "stat", "trend", "graph", "compare"]
+    kind: Literal[
+        "list",
+        "stat",
+        "trend",
+        "graph",
+        "compare",
+        # K2: 첨부(이력서/공고) 기반 단건 딥 비교 — 프론트 비교 화면 계약과 이름을 맞춘
+        # 별도 kind. 기존 "compare"(여러 기술 수요 비교, kind=list 아이템)와는 별개다.
+        "resume_posting",
+        "posting_posting",
+        "resume_market",
+    ]
     label: str
     items: list[ToolResultItem] = []
     value: float | int | str | None = None
     unit: str | None = None
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
+    # K2: 딥 비교 결과 페이로드(프론트 계약 그대로) — kind가 resume_posting/posting_posting/
+    # resume_market일 때만 채워진다. 자유 형식 dict로 두어 프론트 계약이 바뀌어도 이
+    # 스키마를 매번 고치지 않아도 되게 한다.
+    compare: dict[str, Any] | None = None
     debug: dict[str, Any] | None = None
     facts: str | None = None  # synthesize()에 실제로 먹인 근거 문장 — verbose 로그에서 "무엇을 근거로 답했는지" 보여주는 용도
 
