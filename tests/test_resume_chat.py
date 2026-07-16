@@ -336,6 +336,26 @@ def test_resume_recommend_ranks_by_skill_overlap(session: Session) -> None:
     assert items[1]["pct"] == 50.0  # 1/2 * 100
 
 
+def test_resume_recommend_includes_matched_missing_skills_and_region(session: Session) -> None:
+    """python만 보유한 상태로 추천을 받으면, python+react를 요구하는 p1에서
+    matched_skills=["Python"]/missing_skills=["React"]로 갈라져야 하고(카드 배지용),
+    지역(region_district 우선)도 함께 실려야 한다."""
+    owned = {session.info["python_id"]}
+    result = resume_tool.resume_recommend(session, owned, pool="domestic")
+    assert result is not None
+    items = {it["name"]: it for it in result["tool_result"]["items"]}
+
+    p1 = items["백엔드"]  # python+react 요구
+    assert p1["matched_skills"] == ["Python"]
+    assert p1["missing_skills"] == ["React"]
+    assert p1["region"] == "강남구"
+
+    p2 = items["백엔드2"]  # python만 요구 -> 부족 기술 없음
+    assert p2["matched_skills"] == ["Python"]
+    assert p2["missing_skills"] == []
+    assert p2["region"] == "부산"
+
+
 def test_resume_recommend_filters_by_region(session: Session) -> None:
     """강남으로 필터하면 region_district="강남구"인 p1만 나와야 한다(부분 문자열 ILIKE)."""
     owned = {session.info["python_id"], session.info["react_id"]}
