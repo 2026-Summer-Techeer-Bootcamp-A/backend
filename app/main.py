@@ -7,7 +7,7 @@ import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request, HTTPException
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 
 import app.models  # noqa: F401
 from app.core.config import settings
@@ -443,19 +443,38 @@ Instrumentator().instrument(
 # checked_out은 워커마다 다른 풀 인스턴스를 갖고 있으니 워커 프로세스 합산
 # (multiprocess_mode="livesum")으로 노출해야 전체 사용량이 나온다. capacity는
 # 워커 수만큼 곱해진 이론상 총 상한이라 마찬가지로 합산한다.
+#
+# 처음엔 Gauge.set_function(lambda: engine.pool.checkedout())으로 만들었는데,
+# 배포 후 실측해보니 항상 0만 나왔다. set_function은 이 Gauge 객체의 .collect()가
+# 그 프로세스 안에서 직접 호출될 때만 값을 계산하는데, /metrics 핸들러는 매번
+# multiprocess.MultiProcessCollector로 각 워커가 이미 파일에 써놓은 값을 읽어올
+# 뿐 로컬 Gauge의 .collect()를 부르지 않는다. 즉 이 값은 절대 파일에 기록될
+# 기회가 없었다. SQLAlchemy pool의 checkout/checkin 이벤트에 걸어 inc()/dec()로
+# 바꾸니, 그 즉시 각 워커 프로세스의 공유 파일에 기록되어 제대로 합산된다.
 _db_pool_checked_out = Gauge(
     "db_pool_checked_out_connections",
     "SQLAlchemy 커넥션 풀에서 현재 체크아웃된 커넥션 수(전체 워커 합산)",
     multiprocess_mode="livesum",
 )
-_db_pool_checked_out.set_function(lambda: engine.pool.checkedout())
+
+
+@event.listens_for(engine, "checkout")
+def _on_pool_checkout(*_args):
+    _db_pool_checked_out.inc()
+
+
+@event.listens_for(engine, "checkin")
+def _on_pool_checkin(*_args):
+    _db_pool_checked_out.dec()
+
 
 _db_pool_capacity = Gauge(
     "db_pool_capacity_connections",
     "SQLAlchemy 커넥션 풀 최대 용량(pool_size+max_overflow, 전체 워커 합산)",
     multiprocess_mode="livesum",
 )
-_db_pool_capacity.set_function(lambda: POOL_SIZE + MAX_OVERFLOW)
+# 워커 하나당 고정값이라 set_function 없이 임포트 시점에 한 번만 설정해도 된다.
+_db_pool_capacity.set(POOL_SIZE + MAX_OVERFLOW)
 
 # --workers > 1이면 uvicorn이 워커마다 별도 프로세스를 띄우고, 각 프로세스는 자기만의
 # 인메모리 레지스트리에 카운터를 쌓는다. Instrumentator().expose(app)가 만드는 기본
