@@ -155,3 +155,85 @@ def test_min_match_filters_by_coverage_ratio(client: TestClient, monkeypatch: py
     # Toss(100%)만 60% 이상. Woowa(50%), Kakao(0%)는 제외.
     assert companies == {"Toss"}
     assert resp.json()["items"][0]["matched_count"] == 1
+
+
+@pytest.fixture
+def career_client() -> Iterator[TestClient]:
+    """min_match 필터의 경력요건 반영을 검증하기 위한 별도 픽스처.
+    이력서 career_max=2(연차 2년 이하)이고, 두 공고 모두 기술 스택은 100% 일치하지만
+    career_min 요구치가 다르다."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    testing_session = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with testing_session() as seed:
+        python = Skill(canonical="Python", category="language")
+        user = User(email="career@example.com", password_hash="unused")
+        seed.add_all([python, user])
+        seed.flush()
+
+        resume = Resume(
+            user_id=user.id, title="Backend", position="backend", pool="domestic",
+            career_max=2,
+        )
+        seed.add(resume)
+        seed.commit()
+        seed.add(ResumeSkill(resume_id=resume.resume_id, skill_id=python.id))
+        seed.commit()
+
+        senior_posting = Posting(
+            source="jumpit", source_uid="senior1", pool="domestic", company="Senior Co",
+            title="Senior Backend Engineer", post_date=date(2026, 7, 1),
+            career_min=5,
+        )
+        junior_posting = Posting(
+            source="jumpit", source_uid="junior1", pool="domestic", company="Junior Co",
+            title="Junior Backend Engineer", post_date=date(2026, 7, 1),
+            career_min=1,
+        )
+        anyone_posting = Posting(
+            source="jumpit", source_uid="anyone1", pool="domestic", company="Anyone Co",
+            title="Backend Engineer (경력무관)", post_date=date(2026, 7, 1),
+            career_min=None,
+        )
+        seed.add_all([senior_posting, junior_posting, anyone_posting])
+        seed.commit()
+
+        seed.add_all(
+            [
+                # 셋 다 python 1개만 요구, 보유 -> 100% 기술 매칭
+                PostingTech(posting_id=senior_posting.id, skill_id=python.id),
+                PostingTech(posting_id=junior_posting.id, skill_id=python.id),
+                PostingTech(posting_id=anyone_posting.id, skill_id=python.id),
+            ]
+        )
+        seed.commit()
+        resume_id = resume.resume_id
+        user_id = user.id
+
+    def override_get_session() -> Iterator[Session]:
+        with testing_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    test_client = TestClient(app)
+    test_client.resume_id = resume_id  # type: ignore[attr-defined]
+    test_client.token = create_access_token(str(user_id))  # type: ignore[attr-defined]
+    yield test_client
+    app.dependency_overrides.clear()
+
+
+def test_min_match_excludes_postings_requiring_more_career_than_resume(
+    career_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.routers.match.is_token_blocklisted", lambda token: False)
+    resp = career_client.get(
+        "/api/v1/postings",
+        params={"pool": "domestic", "resume_id": career_client.resume_id, "min_match": 0},
+        headers={"Authorization": f"Bearer {career_client.token}"},
+    )
+    assert resp.status_code == 200
+    companies = {item["company"] for item in resp.json()["items"]}
+    # 기술 매칭은 셋 다 100%지만, 이력서 career_max=2로는 career_min=5(Senior Co)를
+    # 충족하지 못하므로 제외되어야 한다. career_min=1(Junior Co)과 경력무관(Anyone Co)은 남는다.
+    assert companies == {"Junior Co", "Anyone Co"}

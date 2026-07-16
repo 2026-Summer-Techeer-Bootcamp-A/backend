@@ -86,6 +86,11 @@ def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
     query = select(Posting.id).where(
         Posting.pool == pool,
         Posting.is_deleted.is_(False),
+        # 마감일이 지난 공고는 시장 모수에서 제외한다(마감일 자체가 없는 상시채용은 유지).
+        # app/crud/posting.py의 _apply_posting_filters와 동일한 기준으로 맞춰서
+        # "지원 가능 공고" 수치와 시장 통계(스킬 점유율/커버리지/gap/roadmap/pivot-map)가
+        # 같은 모수를 쓰도록 한다.
+        Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
     )
 
     if position:
