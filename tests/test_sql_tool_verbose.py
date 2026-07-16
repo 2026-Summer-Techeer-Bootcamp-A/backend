@@ -62,3 +62,23 @@ def test_multi_skill_compare_verbose_true_exposes_real_sql(session: Session) -> 
     assert result is not None
     debug = result["tool_result"]["debug"]
     assert "posting_tech" in debug["sql"]
+
+
+def test_top_locations_without_category_counts_all_postings(session: Session) -> None:
+    # 지역 정보가 있는 공고 2건 모두 region이 없으면 top_locations는 아무것도 세팅해두지
+    # 않았으므로(기존 fixture는 region_district가 없음) 이 테스트를 위해 별도로 채운다.
+    p1 = Posting(source="t", source_uid="loc1", pool="domestic", title="백엔드 채용", region_district="강남구")
+    p2 = Posting(source="t", source_uid="loc2", pool="domestic", title="프론트 채용", region_district="강남구")
+    session.add_all([p1, p2])
+    session.commit()
+
+    result = sql_tool.top_locations(session, pool="domestic")
+    items = result["tool_result"]["items"]
+    gangnam = next(i for i in items if i["name"] == "강남구")
+    assert gangnam["metric"] == "2건"
+
+
+# category 필터가 있는 top_locations 케이스는 tests/test_sql_tool_region_category.py
+# (실 Postgres 필요, @pytest.mark.integration)에 있다 — sql_tool의 category 필터는
+# 원시 SQL에 리터럴 ILIKE를 써서(SQLAlchemy .ilike()와 달리) sqlite 방언으로 컴파일되지
+# 않으므로 이 파일의 fast-tier sqlite 세션으로는 실행 자체가 안 된다.
