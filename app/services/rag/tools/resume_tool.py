@@ -21,6 +21,7 @@ from app.services.match import (
     calculate_coverage_response,
     calculate_gap_response,
     count_matched_postings,
+    market_pool_cutoff_date,
 )
 
 # match.py의 Pool은 Literal["global","domestic"]이라 구체적인 값이 필요하다. RAG 챗은
@@ -131,7 +132,7 @@ def resume_coverage(
     facts = (
         f"{pool_label} 채용시장{f'({category})' if category else ''} 상위 20개 요구기술 중 "
         f"{resp.owned_count}개 보유, 커버리지 {resp.coverage_score}%, "
-        f"보유 기술이 하나라도 걸리는 지원 가능 공고 {matched_postings:,}건"
+        f"보유 기술이 하나라도 걸리는 최근 3년 공고(마감 포함) {matched_postings:,}건"
         f"(표본 {resp.sample_size:,}건)"
     )
 
@@ -199,10 +200,10 @@ def resume_recommend(
             Posting.id.in_(overlap_map.keys()),
             Posting.pool == resolved_pool,
             Posting.is_deleted.is_(False),
-            # 마감일이 지난 공고는 추천 대상에서 제외한다(마감일 자체가 없는 상시채용은
-            # 유지) — match.py build_posting_pool_query/crud/posting.py get_similar_postings와
-            # 동일한 기준.
-            Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
+            # "마감 전 공고만"에서 "최근 3년 이내 게시(마감 포함)"로 추천 모수를 바꿨다
+            # — match.py build_posting_pool_query와 동일한 시장 모수 기준으로 맞춘다.
+            # post_date가 없는 공고는 조용히 빠지지 않게 포함한다.
+            Posting.post_date.is_(None) | (Posting.post_date >= market_pool_cutoff_date()),
         )
         if with_region and region:
             # ORM .ilike()를 써야 sqlite(CI)에서도 컴파일된다 — raw SQL ILIKE는
@@ -230,10 +231,14 @@ def resume_recommend(
     items = []
     for posting, overlap in results:
         fit_pct = round(overlap / n_owned * 100, 1) if n_owned else 0.0
+        # 추천 모수가 마감 공고까지 포함하도록 넓어졌으므로, 이미 마감된 공고를 "지원
+        # 가능"인 것처럼 보이게 두지 않고 metric에 마감 여부를 정직하게 드러낸다.
+        is_closed = posting.close_date is not None and posting.close_date < date.today()
+        metric = f"적합도 {overlap}개 일치" + ("(마감)" if is_closed else "")
         items.append(
             {
                 "name": posting.title,
-                "metric": f"적합도 {overlap}개 일치",
+                "metric": metric,
                 "pct": fit_pct,
                 "id": posting.id,
                 "company": posting.company,
@@ -249,7 +254,10 @@ def resume_recommend(
         region_note = ""
 
     facts_body = "; ".join(f"{it['name']} {it['metric']}" for it in items[:5])
-    facts = f"{pool_label} 채용시장 기준 {region_note}이력서 보유 기술과 겹치는 공고 상위 — {facts_body}"
+    facts = (
+        f"{pool_label} 채용시장(최근 3년, 마감 포함) 기준 {region_note}"
+        f"이력서 보유 기술과 겹치는 공고 상위 — {facts_body}"
+    )
 
     label_region = f" ({region})" if region and not region_fallback else ""
     return {
