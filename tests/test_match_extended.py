@@ -149,11 +149,11 @@ def test_pivot_map_rejects_invalid_kind(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_build_posting_pool_query_excludes_closed_postings() -> None:
-    """시장 모수 헬퍼는 마감된 공고를 제외해야 한다(app/crud/posting.py의
-    _apply_posting_filters와 동일한 기준). 2022년처럼 오래전에 마감된 공고가
-    market 통계(스킬 점유율/커버리지 분포/gap/roadmap/pivot-map)에 섞여 들어가면
-    "지원 가능 공고" 수치와 모수 정의가 어긋난다."""
+def test_build_posting_pool_query_includes_recent_closed_excludes_old() -> None:
+    """시장 모수 헬퍼는 더 이상 "마감 전 공고만"이 아니라 "최근 3년 이내 게시(마감
+    포함)"를 기준으로 삼는다 — 국내 시장은 마감된 공고가 압도적으로 많아 예전 기준으로는
+    표본이 너무 작았다(약 347건). 대신 3년보다 오래된 공고는 트렌드가 바뀌었을 수 있어
+    마감 여부와 무관하게 제외하고, post_date가 없는 공고는 조용히 잃지 않도록 포함한다."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     testing_session = sessionmaker(bind=engine, expire_on_commit=False)
@@ -169,18 +169,36 @@ def test_build_posting_pool_query_excludes_closed_postings() -> None:
             title="Evergreen Posting", post_date=date(2026, 1, 1),
             close_date=None,
         )
-        closed_posting = Posting(
-            source="jumpit", source_uid="closed1", pool="domestic", company="Closed Co",
-            title="Closed Posting (2022)", post_date=date(2022, 1, 1),
-            close_date=date(2022, 3, 1),
+        # 마감은 됐지만 게시일은 최근(3년 이내) — 이제는 시장 모수에 포함되어야 한다.
+        recent_closed_posting = Posting(
+            source="jumpit", source_uid="recent_closed1", pool="domestic", company="Recent Closed Co",
+            title="Recent Closed Posting", post_date=date(2026, 1, 1),
+            close_date=date(2026, 2, 1),
         )
-        seed.add_all([open_posting, evergreen_posting, closed_posting])
+        # post_date가 없는 공고 — 3년 필터로 조용히 빠지면 안 된다.
+        no_post_date_posting = Posting(
+            source="jumpit", source_uid="noDate1", pool="domestic", company="No Date Co",
+            title="No Post Date Posting", post_date=None, close_date=None,
+        )
+        # 3년보다 오래전에 게시된 공고 — 마감 여부와 무관하게 제외되어야 한다.
+        old_posting = Posting(
+            source="jumpit", source_uid="old1", pool="domestic", company="Old Co",
+            title="Old Posting (2020)", post_date=date(2020, 1, 1),
+            close_date=None,
+        )
+        seed.add_all(
+            [open_posting, evergreen_posting, recent_closed_posting, no_post_date_posting, old_posting]
+        )
         seed.commit()
 
     with testing_session() as session:
         pool_query = build_posting_pool_query(pool="domestic", position=None).subquery()
         posting_ids = set(session.scalars(select(pool_query.c.id)).all())
 
-    # 마감된 공고(closed_posting)는 시장 모수에서 빠지고, 상시채용(close_date=None)과
-    # 아직 마감되지 않은 공고만 남아야 한다.
-    assert posting_ids == {open_posting.id, evergreen_posting.id}
+    assert posting_ids == {
+        open_posting.id,
+        evergreen_posting.id,
+        recent_closed_posting.id,
+        no_post_date_posting.id,
+    }
+    assert old_posting.id not in posting_ids
