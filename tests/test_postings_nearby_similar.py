@@ -45,7 +45,16 @@ def client() -> Iterator[TestClient]:
                              post_date=date(2026, 7, 1))
         posting_d = Posting(source="jumpit", source_uid="sd", pool="domestic", company="D", title="D",
                              post_date=date(2026, 7, 1))
-        seed.add_all([posting_a, posting_b, posting_c, posting_d])
+        posting_expired = Posting(
+            source="jumpit",
+            source_uid="se",
+            pool="domestic",
+            company="Expired",
+            title="Expired",
+            post_date=date(2026, 7, 1),
+            close_date=date(2020, 1, 1),
+        )
+        seed.add_all([posting_a, posting_b, posting_c, posting_d, posting_expired])
         seed.commit()
 
         seed.add_all(
@@ -57,6 +66,9 @@ def client() -> Iterator[TestClient]:
                 PostingTech(posting_id=posting_b.id, skill_id=java.id),
                 PostingTech(posting_id=posting_c.id, skill_id=python.id),
                 PostingTech(posting_id=posting_d.id, skill_id=go.id),
+                PostingTech(posting_id=posting_expired.id, skill_id=python.id),
+                PostingTech(posting_id=posting_expired.id, skill_id=java.id),
+                PostingTech(posting_id=posting_expired.id, skill_id=spring.id),
             ]
         )
         seed.commit()
@@ -69,6 +81,7 @@ def client() -> Iterator[TestClient]:
             "posting_b": posting_b.id,
             "posting_c": posting_c.id,
             "posting_d": posting_d.id,
+            "posting_expired": posting_expired.id,
         }
 
     def override_get_session() -> Iterator[Session]:
@@ -122,3 +135,13 @@ def test_similar_ordered_by_overlap_count(client: TestClient) -> None:
 def test_similar_unknown_posting_404(client: TestClient) -> None:
     resp = client.get("/api/v1/postings/999999/similar")
     assert resp.status_code == 404
+
+
+def test_similar_applies_limit_after_excluding_closed_postings(client: TestClient) -> None:
+    posting_id = client.ids["posting_a"]
+
+    resp = client.get(f"/api/v1/postings/{posting_id}/similar?limit=1")
+
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert [item["id"] for item in items] == [client.ids["posting_b"]]
