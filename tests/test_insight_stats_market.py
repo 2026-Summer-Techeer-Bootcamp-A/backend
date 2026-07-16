@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base, get_session
 from app.main import app
-from app.models import Posting, Skill
+from app.models import Posting, PostingCategory, PostingTech, Skill
 
 
 @pytest.fixture
@@ -100,6 +100,22 @@ def client() -> Iterator[TestClient]:
             post_date=date(2026, 6, 1),
         )
         seed.add_all([toss, kakao, naver, stripe])
+        seed.commit()
+
+        # position 필터(ILIKE 기반, app.services.job_category.resolve_job_category)
+        # 검증용 실데이터. toss/kakao는 실제 posting_category 값("서버/백엔드 개발자")으로
+        # '백엔드' 토큰에 걸리고, naver는 프론트엔드라 걸리지 않는다.
+        seed.add_all(
+            [
+                PostingCategory(posting_id=toss.id, category="서버/백엔드 개발자"),
+                PostingCategory(posting_id=kakao.id, category="서버/백엔드 개발자"),
+                PostingCategory(posting_id=naver.id, category="프론트엔드 개발자"),
+                PostingTech(posting_id=toss.id, skill_id=python.id),
+                PostingTech(posting_id=toss.id, skill_id=spring.id),
+                PostingTech(posting_id=kakao.id, skill_id=python.id),
+                PostingTech(posting_id=naver.id, skill_id=aws.id),
+            ]
+        )
         seed.commit()
 
         seed.execute(
@@ -195,6 +211,12 @@ def test_skill_share_requires_pool(client: TestClient) -> None:
 
 
 def test_skill_share_filters_by_position_and_top_k(client: TestClient) -> None:
+    """position='backend'는 mv_skill_share.position exact-match가 아니라 실제
+    posting_category를 ILIKE '%백엔드%'로 필터링해 재계산해야 한다(mv_skill_share.position은
+    'Developer' 같은 별개의 글로벌 영어 분류라 'backend' exact match로는 항상 0건이었다).
+    toss/kakao 두 건만 "서버/백엔드 개발자" 카테고리라 sample_size=2, naver(프론트엔드)는
+    제외된다. python은 toss+kakao 모두에 있어 posting_count=2, spring은 toss에만 있어 1이다.
+    """
     resp = client.get(
         "/api/v1/stats/skill-share",
         params={"pool": "domestic", "position": "backend", "top_k": 2},
@@ -202,12 +224,45 @@ def test_skill_share_filters_by_position_and_top_k(client: TestClient) -> None:
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["sample_size"] == 20
+    assert body["sample_size"] == 2
     assert [item["canonical"] for item in body["items"]] == ["Python", "Spring"]
     python_item = body["items"][0]
     assert python_item["category"] == "language"
-    assert python_item["posting_count"] == 12
-    assert python_item["share"] == 0.6
+    assert python_item["posting_count"] == 2
+    assert python_item["share"] == 1.0
+    spring_item = body["items"][1]
+    assert spring_item["posting_count"] == 1
+    assert spring_item["share"] == 0.5
+
+
+def test_skill_share_korean_position_keyword_resolves_same_as_client_token(client: TestClient) -> None:
+    """RAG가 쓰는 한국어 키워드('백엔드')와 프론트 클라이언트 토큰('backend')이
+    동일한 posting_category ILIKE 토큰으로 해소되어 같은 결과를 내야 한다."""
+    resp = client.get(
+        "/api/v1/stats/skill-share",
+        params={"pool": "domestic", "position": "백엔드", "top_k": 2},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sample_size"] == 2
+    assert [item["canonical"] for item in body["items"]] == ["Python", "Spring"]
+
+
+def test_skill_share_unknown_position_falls_back_to_unfiltered(client: TestClient) -> None:
+    """알 수 없는 position은 0건으로 단정하지 않고 position 미지정 경로(전체 합산)로
+    폴백한다 — 빈 결과보다 정직한 동작이다."""
+    resp = client.get(
+        "/api/v1/stats/skill-share",
+        params={"pool": "domestic", "position": "존재하지않는직군"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # position 미지정 테스트(test_skill_share_without_position_aggregates_across_positions)와
+    # 동일한 base posting 기준 sample_size여야 한다.
+    assert body["sample_size"] == 3
+    assert body["items"][0]["canonical"] == "Python"
 
 
 def test_skill_share_without_position_aggregates_across_positions(client: TestClient) -> None:
