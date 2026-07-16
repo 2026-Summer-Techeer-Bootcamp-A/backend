@@ -20,6 +20,7 @@ from app.models import (
     PostingTech,
     Skill,
 )
+from app.services.job_category import resolve_job_category
 from app.services.match import build_posting_pool_query, get_skill_id_by_canonical
 
 # 그룹내 상대 점유(§5 group-share) 대상 스킬 세트. 프론트/백엔드/DB 그룹은 서버 상수로 고정한다.
@@ -455,34 +456,66 @@ def get_role_stack_fit(
 def get_skill_share(
     session: Session, *, pool: str, position: str | None = None, top_k: int = 20
 ) -> tuple[list[dict], int]:
-    """mv_skill_share 마트 기반 기술 점유율. position 지정 시 그 직군만, 미지정 시 skill별 posting_count 합산."""
-    if position:
-        rows = session.execute(
-            text(
-                """
-                SELECT s.canonical AS canonical, s.category AS category,
-                       m.posting_count AS posting_count, m.share AS share, m.total_postings AS total_postings
-                FROM mv_skill_share m
-                JOIN skill s ON s.id = m.skill_id
-                WHERE m.pool = :pool AND m.position = :position
-                ORDER BY m.posting_count DESC
-                LIMIT :top_k
-                """
-            ),
-            {"pool": pool, "position": position, "top_k": top_k},
-        ).all()
+    """mv_skill_share 마트 기반 기술 점유율. position 지정 시 그 직군만, 미지정 시 skill별 posting_count 합산.
 
-        items = [
-            {
-                "canonical": row.canonical,
-                "category": row.category,
-                "posting_count": int(row.posting_count),
-                "share": round(float(row.share or 0.0), 4),
-            }
-            for row in rows
-        ]
-        sample_size = int(rows[0].total_postings) if rows else 0
-        return items, sample_size
+    position 필터는 mv_skill_share.position과 비교하지 않는다. 그 컬럼은 himalayas류
+    해외 공고에서 온 글로벌 영어 직무 분류('Developer', 'Data Science', 'Sales' 등)라서,
+    프론트가 실제로 보내는 'backend'/'frontend'/'devops'/'data' 같은 토큰이나 RAG가 쓰는
+    '백엔드' 같은 한국어 키워드와 전혀 겹치지 않는다. 그래서 position을 아무 값이나
+    넣어도 항상 sample_size=0인 빈 결과가 나오는 버그가 있었다(신규 유입만 안 됨,
+    position 미지정 경로는 원래도 정상). 대신 RAG sql_tool과 동일하게 position을
+    posting_category ILIKE 토큰으로 해소해 실제 posting/posting_category/posting_tech를
+    직접 집계한다.
+    """
+    if position:
+        category_token = resolve_job_category(position)
+        if category_token is not None:
+            posting_filter = (
+                select(distinct(Posting.id).label("id"))
+                .select_from(Posting)
+                .join(PostingCategory, PostingCategory.posting_id == Posting.id)
+                .where(
+                    Posting.pool == pool,
+                    Posting.is_deleted.is_(False),
+                    # match.py build_posting_pool_query와 동일한 "지원 가능 공고" 모수 기준.
+                    Posting.close_date.is_(None) | (Posting.close_date >= date.today()),
+                    PostingCategory.is_deleted.is_(False),
+                    PostingCategory.category.ilike(f"%{category_token}%"),
+                )
+                .subquery()
+            )
+
+            sample_size = session.scalar(select(func.count()).select_from(posting_filter)) or 0
+            if sample_size == 0:
+                return [], 0
+
+            rows = session.execute(
+                select(
+                    Skill.canonical.label("canonical"),
+                    Skill.category.label("category"),
+                    func.count(distinct(PostingTech.posting_id)).label("posting_count"),
+                )
+                .select_from(PostingTech)
+                .join(posting_filter, posting_filter.c.id == PostingTech.posting_id)
+                .join(Skill, Skill.id == PostingTech.skill_id)
+                .where(Skill.is_deleted.is_(False), PostingTech.is_deleted.is_(False))
+                .group_by(Skill.id, Skill.canonical, Skill.category)
+                .order_by(func.count(distinct(PostingTech.posting_id)).desc())
+                .limit(top_k)
+            ).all()
+
+            items = [
+                {
+                    "canonical": row.canonical,
+                    "category": row.category,
+                    "posting_count": int(row.posting_count),
+                    "share": round(int(row.posting_count) / sample_size, 4) if sample_size else 0.0,
+                }
+                for row in rows
+            ]
+            return items, sample_size
+        # position이 알려진 직군 토큰으로 해소되지 않으면 0건으로 단정하지 않고
+        # 아래 미지정 경로(전체 합산)로 폴백한다 — 빈 결과보다 정직하다.
 
     # id는 posting의 기본키라 이미 유일함. DISTINCT를 걸면 postgres가 dedup을 위해
     # 매칭 행 전체(도메스틱 풀 기준 수십만 건)를 정렬해야 해서, 인덱스가 있어도
