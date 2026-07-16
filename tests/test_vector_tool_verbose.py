@@ -62,6 +62,21 @@ def test_semantic_search_verbose_false_has_no_debug(
     assert result["tool_result"]["debug"] is None
 
 
+def test_semantic_search_items_are_renderable_as_posting_cards(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """K3: semantic_search 결과도 실제 공고 목록이라 프론트가 카드로 렌더링할 수 있게
+    kind="posting_list"이고, 각 item이 id/company/pool을 들고 있어야 한다."""
+    monkeypatch.setattr(vector_tool, "embed_query", lambda q: FAKE_VEC)
+    result = vector_tool.semantic_search(session, "테스트 쿼리", pool="domestic", verbose=False)
+    assert result is not None
+    assert result["tool_result"]["kind"] == "posting_list"
+    item = result["tool_result"]["items"][0]
+    assert item["id"] is not None
+    assert item["company"] == "테스트컴퍼니"
+    assert item["pool"] == "domestic"
+
+
 def test_semantic_search_verbose_true_exposes_embedding_and_sql(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
