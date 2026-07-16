@@ -17,12 +17,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.posting import Posting, PostingTech
+from app.models.skill import Skill
 from app.services.match import (
+    _build_resume_posting_compare,
     calculate_coverage_response,
     calculate_gap_response,
     count_matched_postings,
     market_pool_cutoff_date,
 )
+
+# posting_list 카드 배지(보유/부족 스킬)에 실어보내는 상한 — 요구 기술이 많은 공고라도
+# 카드 UI가 감당 못 할 만큼 배지가 늘어지지 않게 한쪽당 8개로 잘라둔다.
+_SKILL_BADGE_CAP = 8
 
 # match.py의 Pool은 Literal["global","domestic"]이라 구체적인 값이 필요하다. RAG 챗은
 # pool 없이(전체 대상) 질문할 수 있지만 매치 엔진은 국내/해외 중 하나를 요구하므로,
@@ -228,6 +234,33 @@ def resume_recommend(
     if not results:
         return None
 
+    # 카드에 보유(초록)/부족(빨강) 스킬 배지를 붙이려면 공고별 요구 기술 목록이 필요하다.
+    # posting마다 따로 쿼리하면 N+1이 되므로, 랭킹된 posting id 전체를 한 번에 묶어
+    # posting_tech -> skill을 조인해 posting_id별로 모아둔다(get_posting_skill_names와
+    # 같은 조인 패턴, 여러 건을 한 번에 가져오는 점만 다르다).
+    posting_ids = [posting.id for posting, _ in results]
+    skill_rows = session.execute(
+        select(PostingTech.posting_id, Skill.canonical)
+        .join(Skill, Skill.id == PostingTech.skill_id)
+        .where(
+            PostingTech.posting_id.in_(posting_ids),
+            PostingTech.is_deleted.is_(False),
+            Skill.is_deleted.is_(False),
+        )
+    ).all()
+    posting_skills_map: dict[int, list[str]] = {}
+    for pid, canonical in skill_rows:
+        posting_skills_map.setdefault(pid, []).append(canonical)
+
+    owned_names = list(
+        session.scalars(
+            select(Skill.canonical).where(
+                Skill.id.in_(owned_skill_ids),
+                Skill.is_deleted.is_(False),
+            )
+        ).all()
+    )
+
     items = []
     for posting, overlap in results:
         fit_pct = round(overlap / n_owned * 100, 1) if n_owned else 0.0
@@ -235,6 +268,17 @@ def resume_recommend(
         # 가능"인 것처럼 보이게 두지 않고 metric에 마감 여부를 정직하게 드러낸다.
         is_closed = posting.close_date is not None and posting.close_date < date.today()
         metric = f"적합도 {overlap}개 일치" + ("(마감)" if is_closed else "")
+        # matched/missing 계산은 compare_resume_to_posting과 같은 근거(_build_resume_posting_compare의
+        # 대소문자 무시 집합 연산)를 그대로 재사용한다 — 매칭 기준이 두 화면(비교 vs 추천)에서
+        # 갈라지는 사고를 막기 위함이다. 여기서는 posting마다 다시 쿼리하지 않고 위에서
+        # 배치로 가져온 posting_skills_map을 넘겨 같은 함수를 순수 집합 연산으로만 쓴다.
+        compare = _build_resume_posting_compare(
+            resume_title="내 이력서",
+            posting_title=posting.title,
+            owned_names=owned_names,
+            posting_skills=posting_skills_map.get(posting.id, []),
+        )
+        region = posting.region_district or posting.region_city
         items.append(
             {
                 "name": posting.title,
@@ -243,6 +287,9 @@ def resume_recommend(
                 "id": posting.id,
                 "company": posting.company,
                 "pool": posting.pool,
+                "matched_skills": compare["matched_skills"][:_SKILL_BADGE_CAP],
+                "missing_skills": compare["missing_skills"][:_SKILL_BADGE_CAP],
+                "region": region,
             }
         )
 
