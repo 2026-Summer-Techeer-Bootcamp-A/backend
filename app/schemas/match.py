@@ -39,6 +39,7 @@ class MatchGapResponse(BaseModel):
     current_score: float = Field(default=0, ge=0, le=100)
     items: list[WeightedGapSkillOut] = Field(default_factory=list)
     formula_version: str = "weighted-v1"
+    company: str | None = None  # A-1: 목표 기업으로 모수를 좁혔을 때만 채워지는 컨텍스트
 
 class CoverageFilterOut(BaseModel):
     position: str | None = None
@@ -125,6 +126,14 @@ class MatchRoadmapResponse(BaseModel):
     as_of: str
     sample_size: int
     sample_warning: bool | None = None
+
+
+#POST /match/roadmap/scoped 요청 본문. 북마크한 공고 id 목록만을 모수로 로드맵을 계산한다(A-5).
+class MatchRoadmapScopedRequest(BaseModel):
+    resume_id: int | None = None
+    session_id: str | None = None
+    posting_ids: list[int] = Field(min_length=1, description="모수로 삼을 북마크 공고 id 목록")
+    steps: int = Field(default=5, ge=1, le=10, description="추천 학습 순서 단계 수")
 
 
 class PivotMissingSkillOut(BaseModel):
