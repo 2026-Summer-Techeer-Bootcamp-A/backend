@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from math import ceil, log1p
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import Select, distinct, func, select
 from sqlalchemy.orm import Session
 
@@ -19,8 +20,10 @@ from app.schemas.match import (
     MatchWhatIfResponse,
     Pool,
 )
+from app.core.config import settings
 from app.core.redis import get_resume_confirm_session
 from app.services.job_category import resolve_job_category
+from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
 #저장된 이력서에서 기술 가져옴
 def get_skill_ids_from_resume(
@@ -149,6 +152,18 @@ def build_posting_pool_query(pool: Pool, position: str | None, *, only_open: boo
     return query
 
 
+class _MarketSkillFrequenciesCache(BaseModel):
+    """get_market_skill_frequencies 결과를 Redis에 담기 위한 얇은 래퍼.
+
+    반환값이 (list[dict], int) 튜플이라 reference_cache의 get_cached/set_cached가
+    요구하는 pydantic 모델 형태로 감싸야 한다. 이 스킬은 이력서와 무관하게 pool과
+    position, only_open 조합에만 의존해 roadmap/coverage/gap/distribution/pivot-map이
+    모두 같은 값을 공유하므로 요청마다 재계산하지 않고 캐시 하나를 나눠 쓴다."""
+
+    skills: list[dict]
+    sample_size: int
+
+
 def get_market_skill_frequencies(
     session: Session,
     pool: Pool,
@@ -156,6 +171,14 @@ def get_market_skill_frequencies(
     *,
     only_open: bool = False,
 ) -> tuple[list[dict], int]:
+    cache_key = make_reference_cache_key(
+        "match_market_skill_frequencies",
+        {"pool": pool, "position": position, "only_open": only_open},
+    )
+    cached = get_cached(cache_key, _MarketSkillFrequenciesCache)
+    if cached is not None:
+        return cached.skills, cached.sample_size
+
     posting_pool_query = build_posting_pool_query(
         pool=pool, position=position, only_open=only_open
     ).subquery()
@@ -165,6 +188,7 @@ def get_market_skill_frequencies(
     ) or 0
 
     if sample_size == 0:
+        set_cached(cache_key, _MarketSkillFrequenciesCache(skills=[], sample_size=0), settings.stats_cache_ttl_seconds)
         return [], 0
 
     rows = session.execute(
@@ -185,7 +209,7 @@ def get_market_skill_frequencies(
         .order_by(func.count(distinct(PostingTech.posting_id)).desc(), Skill.canonical.asc())
     ).all()
 
-    return [
+    result_skills = [
         {
             "skill_id": row.skill_id,
             "canonical": row.canonical,
@@ -194,7 +218,14 @@ def get_market_skill_frequencies(
             "freq": float(row.freq),
         }
         for row in rows
-    ], sample_size
+    ]
+
+    set_cached(
+        cache_key,
+        _MarketSkillFrequenciesCache(skills=result_skills, sample_size=sample_size),
+        settings.stats_cache_ttl_seconds,
+    )
+    return result_skills, sample_size
 
 
 FORMULA_VERSION = "weighted-v1"
@@ -717,6 +748,88 @@ def calculate_coverage_distribution_response(
     )
 
 
+def build_pool_skill_index(session: Session, posting_pool_subquery) -> dict[int, set[int]]:
+    """posting_pool_subquery(.c.id 컬럼 보유)에 속한 공고들의 posting_id -> 요구 skill_id
+    집합 맵을 단 한 번의 쿼리로 만든다. calculate_coverage_distribution_response가 쓰던
+    것과 같은 (posting_id, skill_id) 스트리밍 패턴이다. roadmap 계열(전체 풀 로드맵과
+    커밋3의 북마크 스코프 로드맵)이 이 인덱스를 공유해, 후보 기술 하나하나마다 COUNT
+    쿼리를 다시 던지지 않고 그리디 선택을 메모리에서 수행할 수 있게 한다."""
+    rows = session.execute(
+        select(PostingTech.posting_id, PostingTech.skill_id)
+        .join(posting_pool_subquery, posting_pool_subquery.c.id == PostingTech.posting_id)
+        .where(PostingTech.is_deleted.is_(False))
+    ).all()
+
+    posting_skills: dict[int, set[int]] = {}
+    for posting_id, skill_id in rows:
+        posting_skills.setdefault(posting_id, set()).add(skill_id)
+    return posting_skills
+
+
+def greedy_roadmap_steps(
+    posting_skills: dict[int, set[int]],
+    owned_skill_ids: set[int],
+    candidates: dict[int, dict],
+    steps: int,
+) -> tuple[int, list[dict]]:
+    """posting_id -> 요구 skill 집합 인덱스만 가지고 메모리에서 그리디 학습 순서를 고른다.
+    '매칭'의 정의는 count_matched_postings와 동일하게 보유 기술 중 하나라도 그 공고의
+    요구 기술과 겹치면 매칭으로 센다(요구기술 대비 커버리지 비율이 아니다). skill_id ->
+    posting_id 역인덱스를 만들어두면, 각 단계에서 후보 기술이 새로 매칭시키는 공고 수를
+    '아직 매칭 안 된 공고 집합과의 교집합 크기'로 바로 구할 수 있어 매 단계 전체 공고를
+    다시 훑지 않아도 된다. DB 세션이 필요 없어 전체 풀 로드맵과 북마크 스코프 로드맵이
+    이 함수를 그대로 공유한다."""
+    skill_to_postings: dict[int, set[int]] = {}
+    for posting_id, skills in posting_skills.items():
+        for skill_id in skills:
+            skill_to_postings.setdefault(skill_id, set()).add(posting_id)
+
+    current_owned = set(owned_skill_ids)
+    matched_ids: set[int] = set()
+    for skill_id in current_owned:
+        matched_ids |= skill_to_postings.get(skill_id, set())
+    matched_before = len(matched_ids)
+    start_matched = matched_before
+    unmatched_ids = set(posting_skills.keys()) - matched_ids
+
+    remaining_candidates = dict(candidates)
+    step_results: list[dict] = []
+    for step_no in range(1, steps + 1):
+        if not remaining_candidates:
+            break
+
+        best_skill_id = None
+        best_gain_ids: set[int] = set()
+        best_matched_after = matched_before
+        for skill_id in remaining_candidates:
+            gain_ids = skill_to_postings.get(skill_id, set()) & unmatched_ids
+            matched_after = matched_before + len(gain_ids)
+            if matched_after > best_matched_after:
+                best_matched_after = matched_after
+                best_skill_id = skill_id
+                best_gain_ids = gain_ids
+
+        if best_skill_id is None:
+            break
+
+        chosen = remaining_candidates.pop(best_skill_id)
+        current_owned.add(best_skill_id)
+        unmatched_ids -= best_gain_ids
+        step_results.append(
+            {
+                "step": step_no,
+                "canonical": chosen["canonical"],
+                "category": chosen["category"],
+                "matched_after": best_matched_after,
+                "delta": best_matched_after - matched_before,
+                "freq": round(chosen.get("freq", 0.0), 4),
+            }
+        )
+        matched_before = best_matched_after
+
+    return start_matched, step_results
+
+
 def calculate_roadmap_response(
     session: Session,
     *,
@@ -727,7 +840,13 @@ def calculate_roadmap_response(
     threshold: float = 50.0,
     candidate_pool_size: int = 30,
 ) -> MatchRoadmapResponse:
-    """미보유 기술 중 매 단계 매칭 공고 수를 가장 많이 늘리는 기술을 탐욕적으로 선택. widgets 'y1-learning-path' 정식화."""
+    """미보유 기술 중 매 단계 매칭 공고 수를 가장 많이 늘리는 기술을 탐욕적으로 선택. widgets 'y1-learning-path' 정식화.
+
+    예전에는 후보 기술(최대 30개) x 단계(최대 5)마다 count_matched_postings로 COUNT 쿼리를
+    새로 던져 요청 하나에 최대 150회 가까운 DB 왕복이 들었다. 공고 -> 요구 skill_id 집합을
+    build_pool_skill_index로 한 번만 읽어와 greedy_roadmap_steps가 메모리에서 그리디 선택을
+    끝내도록 바꿔, DB 쿼리 수를 요청당 상수 개(시장 스킬 빈도 조회 + 인덱스 조회 + as_of)로
+    줄였다."""
     market_skills, sample_size = get_market_skill_frequencies(
         session=session, pool=pool, position=position, only_open=True
     )
@@ -736,47 +855,12 @@ def calculate_roadmap_response(
     }
     candidates = dict(list(candidates.items())[:candidate_pool_size])
 
-    current_owned = set(owned_skill_ids)
-    matched_before = count_matched_postings(
-        session=session, pool=pool, position=position, skill_ids=current_owned, only_open=True
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position, only_open=True).subquery()
+    posting_skills = build_pool_skill_index(session, posting_pool_query)
+
+    start_matched, step_results = greedy_roadmap_steps(
+        posting_skills, owned_skill_ids, candidates, steps
     )
-    start_matched = matched_before
-
-    step_results = []
-    for step_no in range(1, steps + 1):
-        if not candidates:
-            break
-
-        best_skill_id = None
-        best_matched_after = matched_before
-        for skill_id in candidates:
-            matched_after = count_matched_postings(
-                session=session,
-                pool=pool,
-                position=position,
-                skill_ids=current_owned | {skill_id},
-                only_open=True,
-            )
-            if matched_after > best_matched_after:
-                best_matched_after = matched_after
-                best_skill_id = skill_id
-
-        if best_skill_id is None:
-            break
-
-        chosen = candidates.pop(best_skill_id)
-        current_owned.add(best_skill_id)
-        step_results.append(
-            {
-                "step": step_no,
-                "canonical": chosen["canonical"],
-                "category": chosen["category"],
-                "matched_after": best_matched_after,
-                "delta": best_matched_after - matched_before,
-                "freq": round(chosen["freq"], 4),
-            }
-        )
-        matched_before = best_matched_after
 
     return MatchRoadmapResponse(
         pool=pool,
