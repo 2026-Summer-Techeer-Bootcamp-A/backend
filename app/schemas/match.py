@@ -13,6 +13,17 @@ class GapSkillOut(BaseModel):
     category: str
 
 
+class WeightedGapSkillOut(BaseModel):
+    canonical: str
+    posting_count: int
+    frequency: float = Field(ge=0, le=1)
+    weight: float = Field(ge=0, le=1)
+    tier: Literal["core", "supporting"]
+    score_gain_if_owned: float = Field(ge=0, le=100)
+    unlocked_posting_count: int
+    reason: str
+
+
 class RadarOut(BaseModel):
     category: str
     coverage: float = Field(ge=0, le=1) #카테고리에서 시장이 요구하는 기술 중, 내가 가진 기술
@@ -25,6 +36,9 @@ class MatchGapResponse(BaseModel):
     as_of: str
     sample_size: int
     sample_warning: bool | None = None
+    current_score: float = Field(default=0, ge=0, le=100)
+    items: list[WeightedGapSkillOut] = Field(default_factory=list)
+    formula_version: str = "weighted-v1"
 
 class CoverageFilterOut(BaseModel):
     position: str | None = None
@@ -38,6 +52,14 @@ class CoverageSkillOut(BaseModel):
     owned: bool #내가 가진 기술인지 여부
 
 
+    posting_count: int = 0
+    frequency: float = Field(default=0, ge=0, le=1)
+    weight: float = Field(default=0, ge=0, le=1)
+    tier: Literal["core", "supporting"] = "supporting"
+    score_contribution: float = Field(default=0, ge=0, le=100)
+    penalty_contribution: float = Field(default=0, ge=0, le=100)
+
+
 class MatchCoverageResponse(BaseModel):
     pool: Pool
     filter: CoverageFilterOut
@@ -47,6 +69,10 @@ class MatchCoverageResponse(BaseModel):
     as_of: str
     sample_size: int
     sample_warning: bool
+    score: float = Field(default=0, ge=0, le=100)
+    base_score: float = Field(default=0, ge=0, le=100)
+    core_missing_penalty: float = Field(default=0, ge=0, le=100)
+    formula_version: str = "weighted-v1"
 
 class MatchWhatIfResponse(BaseModel):
     add: str
