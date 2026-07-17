@@ -100,7 +100,7 @@ def market_pool_cutoff_date() -> date:
     return date.today() - timedelta(days=MARKET_WINDOW_DAYS)
 
 
-def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
+def build_posting_pool_query(pool: Pool, position: str | None, *, only_open: bool = False) -> Select:
     query = select(Posting.id).where(
         Posting.pool == pool,
         Posting.is_deleted.is_(False),
@@ -111,6 +111,17 @@ def build_posting_pool_query(pool: Pool, position: str | None) -> Select:
         # 이 필터로 조용히 잃지 않도록 NULL은 포함한다.
         Posting.post_date.is_(None) | (Posting.post_date >= market_pool_cutoff_date()),
     )
+
+    if only_open:
+        # 전략 엔진(coverage/gap/roadmap/what-if/pivot/distribution)은 "시장에 어떤 기술이
+        # 얼마나 흔한가"가 아니라 "지금 지원 가능한 공고 중 몇 건이 나에게 걸리는가"를
+        # 답해야 하는데, 위의 3년 윈도우만으로는 이미 마감된 공고까지 모수에 섞여 매칭
+        # 건수가 실제 지원 가능 건수보다 크게 부풀려진다. app/crud/posting.py의 공고
+        # 목록 조회(_apply_posting_filters)와 동일하게 마감일이 없거나 오늘 이후인
+        # 공고만 남긴다.
+        query = query.where(
+            Posting.close_date.is_(None) | (Posting.close_date >= date.today())
+        )
 
     if position:
         # position은 posting_category.category와 정확히 일치시키면 안 된다. 프론트가
@@ -142,8 +153,12 @@ def get_market_skill_frequencies(
     session: Session,
     pool: Pool,
     position: str | None,
+    *,
+    only_open: bool = False,
 ) -> tuple[list[dict], int]:
-    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+    posting_pool_query = build_posting_pool_query(
+        pool=pool, position=position, only_open=only_open
+    ).subquery()
 
     sample_size = session.scalar(
         select(func.count()).select_from(posting_pool_query)
@@ -262,6 +277,7 @@ def calculate_gap_response(
         session=session,
         pool=pool,
         position=position,
+        only_open=True,
     )
     target_skills = select_target_skills(market_skills)
     weighted = calculate_match_score(owned_skill_ids, target_skills)
@@ -342,6 +358,7 @@ def calculate_coverage_response(
         session=session,
         pool=pool,
         position=position,
+        only_open=True,
     )
 
     top_skills = select_target_skills(market_skills, top_k)
@@ -537,8 +554,11 @@ def get_pool_as_of(
     *,
     pool: Pool,
     position: str | None = None,
+    only_open: bool = False,
 ) -> str:
-    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+    posting_pool_query = build_posting_pool_query(
+        pool=pool, position=position, only_open=only_open
+    ).subquery()
 
     as_of = session.scalar(
         select(func.max(Posting.post_date))
@@ -571,11 +591,14 @@ def count_matched_postings(
     pool: Pool,
     position: str | None,
     skill_ids: set[int],
+    only_open: bool = False,
 ) -> int:
     if not skill_ids:
         return 0
 
-    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+    posting_pool_query = build_posting_pool_query(
+        pool=pool, position=position, only_open=only_open
+    ).subquery()
 
     return session.scalar(
         select(func.count(distinct(PostingTech.posting_id)))
@@ -597,7 +620,9 @@ def calculate_what_if_response(
 ) -> MatchWhatIfResponse:
     add_skill_id, add_canonical = get_skill_id_by_canonical(session=session, canonical=add)
 
-    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+    posting_pool_query = build_posting_pool_query(
+        pool=pool, position=position, only_open=True
+    ).subquery()
     sample_size = session.scalar(select(func.count()).select_from(posting_pool_query)) or 0
 
     matched_before = count_matched_postings(
@@ -605,6 +630,7 @@ def calculate_what_if_response(
         pool=pool,
         position=position,
         skill_ids=owned_skill_ids,
+        only_open=True,
     )
 
     matched_after = count_matched_postings(
@@ -612,6 +638,7 @@ def calculate_what_if_response(
         pool=pool,
         position=position,
         skill_ids=owned_skill_ids | {add_skill_id},
+        only_open=True,
     )
 
     return MatchWhatIfResponse(
@@ -619,7 +646,7 @@ def calculate_what_if_response(
         matched_before=matched_before,
         matched_after=matched_after,
         delta=matched_after - matched_before,
-        as_of=get_pool_as_of(session=session, pool=pool, position=position),
+        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=True),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
     )
@@ -636,7 +663,9 @@ def calculate_coverage_distribution_response(
     bin_size: int = 5,
 ) -> MatchCoverageDistributionResponse:
     """공고별(요구기술 min_required_skills개 이상) 커버리지 분포 히스토그램. widgets 'c-coverage-dist' 정식화."""
-    posting_pool_query = build_posting_pool_query(pool=pool, position=position).subquery()
+    posting_pool_query = build_posting_pool_query(
+        pool=pool, position=position, only_open=True
+    ).subquery()
 
     rows = session.execute(
         select(PostingTech.posting_id, PostingTech.skill_id)
@@ -681,7 +710,7 @@ def calculate_coverage_distribution_response(
         matched=matched,
         total=total,
         threshold=threshold,
-        as_of=get_pool_as_of(session=session, pool=pool, position=position),
+        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=True),
         sample_size=total,
         sample_warning=True if total < 50 else None,
         note=f"요구기술 {min_required_skills}개 이상 공고만 집계 · 히스토그램 bin={bin_size}%",
@@ -699,14 +728,18 @@ def calculate_roadmap_response(
     candidate_pool_size: int = 30,
 ) -> MatchRoadmapResponse:
     """미보유 기술 중 매 단계 매칭 공고 수를 가장 많이 늘리는 기술을 탐욕적으로 선택. widgets 'y1-learning-path' 정식화."""
-    market_skills, sample_size = get_market_skill_frequencies(session=session, pool=pool, position=position)
+    market_skills, sample_size = get_market_skill_frequencies(
+        session=session, pool=pool, position=position, only_open=True
+    )
     candidates = {
         s["skill_id"]: s for s in market_skills if s["skill_id"] not in owned_skill_ids
     }
     candidates = dict(list(candidates.items())[:candidate_pool_size])
 
     current_owned = set(owned_skill_ids)
-    matched_before = count_matched_postings(session=session, pool=pool, position=position, skill_ids=current_owned)
+    matched_before = count_matched_postings(
+        session=session, pool=pool, position=position, skill_ids=current_owned, only_open=True
+    )
     start_matched = matched_before
 
     step_results = []
@@ -718,7 +751,11 @@ def calculate_roadmap_response(
         best_matched_after = matched_before
         for skill_id in candidates:
             matched_after = count_matched_postings(
-                session=session, pool=pool, position=position, skill_ids=current_owned | {skill_id}
+                session=session,
+                pool=pool,
+                position=position,
+                skill_ids=current_owned | {skill_id},
+                only_open=True,
             )
             if matched_after > best_matched_after:
                 best_matched_after = matched_after
@@ -747,7 +784,7 @@ def calculate_roadmap_response(
         total=sample_size,
         threshold=threshold,
         steps=step_results,
-        as_of=get_pool_as_of(session=session, pool=pool, position=position),
+        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=True),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
     )
@@ -838,7 +875,9 @@ def calculate_pivot_map_response(
 
     if kind in ("category", "both"):
         for name, n in get_category_targets(session, pool, limit):
-            skills, _ = get_market_skill_frequencies(session=session, pool=pool, position=name)
+            skills, _ = get_market_skill_frequencies(
+                session=session, pool=pool, position=name, only_open=True
+            )
             targets_out.append(_build_target(name, n, "category", skills))
             total_sample += n
 
