@@ -317,16 +317,21 @@ def calculate_gap_response(
     position: str | None,
     owned_skill_ids: set[int],
     company: str | None = None,
+    only_open: bool = False,
 ) -> MatchGapResponse:
     """이력서 대비 시장 요구기술 갭. company가 주어지면(A-1) 시장 전체가 아니라 그 기업의
     열린 공고만을 모수로 좁혀 '이 기업에 지원하려면 뭘 배워야 하는가'를 답한다. 나머지
     계산(가중 점수, 카테고리 레이더, 스킬별 학습 효과)은 pool 자체를 좁힌 것 외에는
-    기존 로직을 그대로 재사용한다."""
+    기존 로직을 그대로 재사용한다.
+
+    only_open은 호출부가 정한다. 대시보드 엔드포인트는 마감된 공고를 제외하려고
+    True를 넘기고, RAG 도구(resume_tool)는 "최근 3년 · 마감 포함" 계약을 지키려고
+    기본값 False를 그대로 쓴다."""
     market_skills, sample_size = get_market_skill_frequencies(
         session=session,
         pool=pool,
         position=position,
-        only_open=True,
+        only_open=only_open,
         company=company,
     )
     target_skills = select_target_skills(market_skills)
@@ -404,12 +409,13 @@ def calculate_coverage_response(
     position: str | None,
     owned_skill_ids: set[int],
     top_k: int = 20,
+    only_open: bool = False,
 ) -> MatchCoverageResponse:
     market_skills, sample_size = get_market_skill_frequencies(
         session=session,
         pool=pool,
         position=position,
-        only_open=True,
+        only_open=only_open,
     )
 
     top_skills = select_target_skills(market_skills, top_k)
@@ -668,11 +674,12 @@ def calculate_what_if_response(
     add: str,
     owned_skill_ids: set[int],
     position: str | None = None,
+    only_open: bool = False,
 ) -> MatchWhatIfResponse:
     add_skill_id, add_canonical = get_skill_id_by_canonical(session=session, canonical=add)
 
     posting_pool_query = build_posting_pool_query(
-        pool=pool, position=position, only_open=True
+        pool=pool, position=position, only_open=only_open
     ).subquery()
     sample_size = session.scalar(select(func.count()).select_from(posting_pool_query)) or 0
 
@@ -681,7 +688,7 @@ def calculate_what_if_response(
         pool=pool,
         position=position,
         skill_ids=owned_skill_ids,
-        only_open=True,
+        only_open=only_open,
     )
 
     matched_after = count_matched_postings(
@@ -689,7 +696,7 @@ def calculate_what_if_response(
         pool=pool,
         position=position,
         skill_ids=owned_skill_ids | {add_skill_id},
-        only_open=True,
+        only_open=only_open,
     )
 
     return MatchWhatIfResponse(
@@ -697,7 +704,7 @@ def calculate_what_if_response(
         matched_before=matched_before,
         matched_after=matched_after,
         delta=matched_after - matched_before,
-        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=True),
+        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=only_open),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
     )
@@ -712,10 +719,11 @@ def calculate_coverage_distribution_response(
     threshold: float = 50.0,
     min_required_skills: int = 3,
     bin_size: int = 5,
+    only_open: bool = False,
 ) -> MatchCoverageDistributionResponse:
     """공고별(요구기술 min_required_skills개 이상) 커버리지 분포 히스토그램. widgets 'c-coverage-dist' 정식화."""
     posting_pool_query = build_posting_pool_query(
-        pool=pool, position=position, only_open=True
+        pool=pool, position=position, only_open=only_open
     ).subquery()
 
     rows = session.execute(
@@ -749,6 +757,7 @@ def calculate_coverage_distribution_response(
         pool=pool,
         position=position,
         owned_skill_ids=owned_skill_ids,
+        only_open=only_open,
     ).coverage_score
 
     my_percentile = round(sum(1 for c in coverages if c <= coverage_score) / total * 100, 1) if total else 0.0
@@ -761,7 +770,7 @@ def calculate_coverage_distribution_response(
         matched=matched,
         total=total,
         threshold=threshold,
-        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=True),
+        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=only_open),
         sample_size=total,
         sample_warning=True if total < 50 else None,
         note=f"요구기술 {min_required_skills}개 이상 공고만 집계 · 히스토그램 bin={bin_size}%",
@@ -859,6 +868,7 @@ def calculate_roadmap_response(
     steps: int = 5,
     threshold: float = 50.0,
     candidate_pool_size: int = 30,
+    only_open: bool = False,
 ) -> MatchRoadmapResponse:
     """미보유 기술 중 매 단계 매칭 공고 수를 가장 많이 늘리는 기술을 탐욕적으로 선택. widgets 'y1-learning-path' 정식화.
 
@@ -868,14 +878,14 @@ def calculate_roadmap_response(
     끝내도록 바꿔, DB 쿼리 수를 요청당 상수 개(시장 스킬 빈도 조회 + 인덱스 조회 + as_of)로
     줄였다."""
     market_skills, sample_size = get_market_skill_frequencies(
-        session=session, pool=pool, position=position, only_open=True
+        session=session, pool=pool, position=position, only_open=only_open
     )
     candidates = {
         s["skill_id"]: s for s in market_skills if s["skill_id"] not in owned_skill_ids
     }
     candidates = dict(list(candidates.items())[:candidate_pool_size])
 
-    posting_pool_query = build_posting_pool_query(pool=pool, position=position, only_open=True).subquery()
+    posting_pool_query = build_posting_pool_query(pool=pool, position=position, only_open=only_open).subquery()
     posting_skills = build_pool_skill_index(session, posting_pool_query)
 
     start_matched, step_results = greedy_roadmap_steps(
@@ -888,7 +898,7 @@ def calculate_roadmap_response(
         total=sample_size,
         threshold=threshold,
         steps=step_results,
-        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=True),
+        as_of=get_pool_as_of(session=session, pool=pool, position=position, only_open=only_open),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
     )
@@ -1068,6 +1078,7 @@ def calculate_pivot_map_response(
     kind: str = "both",
     limit: int = 10,
     top_k_skills: int = 15,
+    only_open: bool = False,
 ) -> MatchPivotMapResponse:
     """직군·산업별 상위 요구기술 대비 내 커버리지("커리어 피벗 맵"). widgets 'y2-pivot-map' 정식화."""
     targets_out: list[dict] = []
@@ -1087,7 +1098,7 @@ def calculate_pivot_map_response(
     if kind in ("category", "both"):
         for name, n in get_category_targets(session, pool, limit):
             skills, _ = get_market_skill_frequencies(
-                session=session, pool=pool, position=name, only_open=True
+                session=session, pool=pool, position=name, only_open=only_open
             )
             targets_out.append(_build_target(name, n, "category", skills))
             total_sample += n
