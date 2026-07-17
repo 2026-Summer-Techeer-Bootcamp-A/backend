@@ -14,6 +14,7 @@ from app.schemas.match import (
     MatchGapResponse,
     MatchPivotMapResponse,
     MatchRoadmapResponse,
+    MatchRoadmapScopedRequest,
     MatchWhatIfResponse,
     Pool,
 )
@@ -21,6 +22,7 @@ from app.services.match import (
     calculate_coverage_distribution_response,
     calculate_pivot_map_response,
     calculate_roadmap_response,
+    calculate_scoped_roadmap_response,
     calculate_what_if_response,
     calculate_coverage_response,
     calculate_gap_response,
@@ -84,6 +86,7 @@ def get_match_gap(
     resume_id: Annotated[int | None, Query(description="저장 이력서 ID")] = None,
     session_id: Annotated[str | None, Query(description="비로그인 분석 세션 ID")] = None,
     position: Annotated[str | None, Query(description="직무 필터")] = None,
+    company: Annotated[str | None, Query(description="목표 기업명(부분 일치). 지정하면 그 기업의 열린 공고만 모수로 삼는다")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> MatchGapResponse:
     if resume_id is None and session_id is None:
@@ -115,6 +118,7 @@ def get_match_gap(
         pool=pool,
         position=position,
         owned_skill_ids=owned_skill_ids,
+        company=company,
     )
 
 @router.get(
@@ -317,4 +321,30 @@ def get_match_pivot_map(
         owned_skill_ids=owned_skill_ids,
         kind=kind,
         limit=limit,
+    )
+
+
+@router.post(
+    "/roadmap/scoped",
+    response_model=MatchRoadmapResponse,
+)
+def post_match_roadmap_scoped(
+    session: SessionDep,
+    body: MatchRoadmapScopedRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> MatchRoadmapResponse:
+    """북마크한 공고 id 목록(body.posting_ids)만을 모수로 로드맵을 계산한다(A-5).
+    /match/roadmap과 달리 pool/position으로 시장 전체를 모수 삼지 않고, 프론트가
+    직접 넘긴 공고 id 집합 안에서만 '이 기술을 배우면 몇 건이 새로 지원 가능해지는가'를
+    답해 북마크 기반 학습 경로 화면을 뒷받침한다. resume_id/session_id는 둘 다 선택값이라
+    (지도·GitHub topics 계열과 같은 이유로) 없어도 400을 던지지 않고 보유 기술 0개인
+    기준선("아무것도 안 배웠을 때 이 북마크들 중 몇 개가 지금 매칭되는가")으로 계산한다."""
+    owned_skill_ids = resolve_optional_owned_skill_ids(
+        session, body.resume_id, body.session_id, authorization
+    ) or set()
+    return calculate_scoped_roadmap_response(
+        session=session,
+        posting_ids=body.posting_ids,
+        owned_skill_ids=owned_skill_ids,
+        steps=body.steps,
     )
