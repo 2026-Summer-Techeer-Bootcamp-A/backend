@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from math import ceil, log1p
 
 from fastapi import HTTPException, status
 from sqlalchemy import Select, distinct, func, select
@@ -156,6 +157,7 @@ def get_market_skill_frequencies(
             Skill.id.label("skill_id"),
             Skill.canonical,
             Skill.category,
+            func.count(distinct(PostingTech.posting_id)).label("posting_count"),
             (func.count(distinct(PostingTech.posting_id)) / sample_size).label("freq"),
         )
         .join(PostingTech, PostingTech.skill_id == Skill.id)
@@ -173,10 +175,80 @@ def get_market_skill_frequencies(
             "skill_id": row.skill_id,
             "canonical": row.canonical,
             "category": row.category,
+            "posting_count": row.posting_count,
             "freq": float(row.freq),
         }
         for row in rows
     ], sample_size
+
+
+FORMULA_VERSION = "weighted-v1"
+CORE_RATIO = 0.2
+PENALTY_STRENGTH = 0.4
+DEFAULT_TARGET_SKILL_LIMIT = 20
+
+
+def select_target_skills(
+    market_skills: list[dict],
+    limit: int = DEFAULT_TARGET_SKILL_LIMIT,
+) -> list[dict]:
+    """Select the shared, frequency-ranked skill universe for coverage and gap."""
+    return market_skills[:limit]
+
+
+def calculate_match_score(
+    owned_skill_ids: set[int],
+    target_skills: list[dict],
+    *,
+    core_ratio: float = CORE_RATIO,
+    penalty_strength: float = PENALTY_STRENGTH,
+) -> dict:
+    """Return a deterministic weighted score without database dependencies."""
+    if not target_skills:
+        return {"score": 0.0, "base_score": 0.0, "core_missing_penalty": 0.0, "skills": []}
+
+    raw_weights = [log1p(max(0, skill.get("posting_count", 0))) for skill in target_skills]
+    total_weight = sum(raw_weights)
+    if total_weight <= 0:
+        raw_weights = [1.0] * len(target_skills)
+        total_weight = float(len(target_skills))
+
+    core_count = max(1, ceil(len(target_skills) * core_ratio))
+    weights = [value / total_weight for value in raw_weights]
+    base_score = 100 * sum(
+        weight for skill, weight in zip(target_skills, weights)
+        if skill["skill_id"] in owned_skill_ids
+    )
+    core_weight = sum(weights[:core_count])
+    missing_core_weight = sum(
+        weight for skill, weight in zip(target_skills[:core_count], weights[:core_count])
+        if skill["skill_id"] not in owned_skill_ids
+    )
+    missing_core_ratio = missing_core_weight / core_weight if core_weight else 0.0
+    score = base_score * (1 - penalty_strength * missing_core_ratio)
+    penalty = base_score - score
+
+    explained = []
+    for index, (skill, weight) in enumerate(zip(target_skills, weights)):
+        owned = skill["skill_id"] in owned_skill_ids
+        is_core = index < core_count
+        explained.append({
+            **skill,
+            "weight": weight,
+            "tier": "core" if is_core else "supporting",
+            "owned": owned,
+            "score_contribution": 100 * weight if owned else 0.0,
+            "penalty_contribution": (
+                base_score * penalty_strength * weight / core_weight
+                if is_core and not owned and core_weight else 0.0
+            ),
+        })
+    return {
+        "score": round(score, 1),
+        "base_score": round(base_score, 1),
+        "core_missing_penalty": round(penalty, 1),
+        "skills": explained,
+    }
 
 
 def calculate_gap_response(
@@ -191,6 +263,26 @@ def calculate_gap_response(
         pool=pool,
         position=position,
     )
+    target_skills = select_target_skills(market_skills)
+    weighted = calculate_match_score(owned_skill_ids, target_skills)
+    weighted_by_id = {skill["skill_id"]: skill for skill in weighted["skills"]}
+    impact_items = []
+    for skill in target_skills:
+        if skill["skill_id"] in owned_skill_ids:
+            continue
+        after = calculate_match_score(owned_skill_ids | {skill["skill_id"]}, target_skills)
+        detail = weighted_by_id[skill["skill_id"]]
+        impact_items.append({
+            "canonical": skill["canonical"],
+            "posting_count": skill["posting_count"],
+            "frequency": round(skill["freq"], 4),
+            "weight": round(detail["weight"], 6),
+            "tier": detail["tier"],
+            "score_gain_if_owned": round(after["score"] - weighted["score"], 1),
+            "unlocked_posting_count": skill["posting_count"],
+            "reason": f"선택 시장 공고의 {round(skill['freq'] * 100)}%에서 요구되는 {'핵심' if detail['tier'] == 'core' else '보조'} 기술",
+        })
+    impact_items.sort(key=lambda item: (-item["score_gain_if_owned"], -item["posting_count"], item["canonical"]))
 
     gap_top5 = [
         {
@@ -233,6 +325,9 @@ def calculate_gap_response(
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=True if sample_size < 50 else None,
+        current_score=weighted["score"],
+        items=impact_items[:10],
+        formula_version=FORMULA_VERSION,
     )
 
 def calculate_coverage_response(
@@ -249,7 +344,8 @@ def calculate_coverage_response(
         position=position,
     )
 
-    top_skills = market_skills[:top_k]
+    top_skills = select_target_skills(market_skills, top_k)
+    weighted = calculate_match_score(owned_skill_ids, top_skills)
     total_freq = sum(skill["freq"] for skill in top_skills)
     owned_freq = sum(
         skill["freq"]
@@ -277,14 +373,24 @@ def calculate_coverage_response(
             {
                 "canonical": skill["canonical"],
                 "freq": round(skill["freq"], 4),
-                "owned": skill["skill_id"] in owned_skill_ids,
+                "frequency": round(skill["freq"], 4),
+                "posting_count": skill["posting_count"],
+                "owned": skill["owned"],
+                "weight": round(skill["weight"], 6),
+                "tier": skill["tier"],
+                "score_contribution": round(skill["score_contribution"], 1),
+                "penalty_contribution": round(skill["penalty_contribution"], 1),
             }
-            for skill in top_skills
+            for skill in weighted["skills"]
         ],
         owned_count=owned_count,
         as_of=date.today().isoformat(),
         sample_size=sample_size,
         sample_warning=sample_size < 50,
+        score=weighted["score"],
+        base_score=weighted["base_score"],
+        core_missing_penalty=weighted["core_missing_penalty"],
+        formula_version=FORMULA_VERSION,
     )
 
 def _dedupe_sorted_ci(names: list[str]) -> list[str]:
