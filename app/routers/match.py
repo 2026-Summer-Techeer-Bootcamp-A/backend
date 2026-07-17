@@ -119,6 +119,7 @@ def get_match_gap(
         position=position,
         owned_skill_ids=owned_skill_ids,
         company=company,
+        only_open=True,
     )
 
 @router.get(
@@ -164,6 +165,7 @@ def get_match_coverage(
         position=position,
         owned_skill_ids=owned_skill_ids,
         top_k=top_k,
+        only_open=True,
     )
 
 @router.get(
@@ -208,6 +210,7 @@ def get_match_what_if(
         pool=pool,
         add=add,
         owned_skill_ids=owned_skill_ids,
+        only_open=True,
     )
 
 
@@ -269,6 +272,7 @@ def get_match_coverage_distribution(
         owned_skill_ids=owned_skill_ids,
         threshold=threshold,
         min_required_skills=min_required_skills,
+        only_open=True,
     )
 
 
@@ -292,6 +296,7 @@ def get_match_roadmap(
         position=position,
         owned_skill_ids=owned_skill_ids,
         steps=steps,
+        only_open=True,
     )
 
 
@@ -321,6 +326,7 @@ def get_match_pivot_map(
         owned_skill_ids=owned_skill_ids,
         kind=kind,
         limit=limit,
+        only_open=True,
     )
 
 
