@@ -29,6 +29,7 @@ class ResumeParseResponse(BaseModel):
 
 class ResumeConfirmRequest(BaseModel):
     skills: list[ParsedSkill] = Field(min_length=1)
+    certs: list[ParsedCert] = Field(default_factory=list)
     position: str | None = None
     career_min: int | None = Field(default=None, ge=0)
     career_max: int | None = Field(default=None, ge=0)
