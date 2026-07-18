@@ -92,6 +92,10 @@ def test_parse_resume_returns_skills_position_and_career(
         "position": "backend",
         "career_min": 3,
         "career_max": 5,
+        "resume_text": (
+            "Backend developer with 3-5 years using Python, AWS, and 리액트. "
+            "Also used MysteryTool. Certified: AWS Certified Solutions Architect."
+        ),
     }
 
 
@@ -137,6 +141,7 @@ def test_confirm_resume_stores_confirmed_input_in_session(
             "career_max": 5,
             "pool": "global",
             "memo": None,
+            "resume_text": None,
         },
         "ttl": 3600,
     }
