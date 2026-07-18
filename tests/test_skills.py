@@ -47,7 +47,7 @@ def client() -> Iterator[TestClient]:
 
 
 def test_get_skills_searches_canonical_name(client: TestClient) -> None:
-    response = client.get("/skills", params={"q": "Pyth"})
+    response = client.get("/api/v1/skills", params={"q": "Pyth"})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -62,21 +62,21 @@ def test_get_skills_searches_canonical_name(client: TestClient) -> None:
 
 
 def test_get_skills_searches_korean_alias(client: TestClient) -> None:
-    response = client.get("/skills", params={"q": "파이"})
+    response = client.get("/api/v1/skills", params={"q": "파이"})
 
     assert response.status_code == 200
     assert response.json()["skills"][0]["canonical"] == "Python"
 
 
 def test_get_skills_filters_by_category(client: TestClient) -> None:
-    response = client.get("/skills", params={"q": "도", "category": "language"})
+    response = client.get("/api/v1/skills", params={"q": "도", "category": "language"})
 
     assert response.status_code == 200
     assert response.json() == {"skills": []}
 
 
 def test_get_skills_limits_results(client: TestClient) -> None:
-    response = client.get("/skills", params={"limit": 2})
+    response = client.get("/api/v1/skills", params={"limit": 2})
 
     assert response.status_code == 200
     assert len(response.json()["skills"]) == 2

@@ -121,7 +121,7 @@ def client_with_fake_redis(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 @pytest.mark.parametrize(
     ("router_module", "crud_name", "path", "params", "empty_body", "expected_ttl"),
     [
-        ("app.routers.skills", "search_skills", "/skills", {"q": "py"}, {"skills": []}, 24 * 60 * 60),
+        ("app.routers.skills", "search_skills", "/api/v1/skills", {"q": "py"}, {"skills": []}, 24 * 60 * 60),
         (
             "app.routers.job_categories",
             "list_job_categories",
@@ -233,8 +233,8 @@ def test_repeat_request_served_from_real_redis_with_expected_ttl(
     app.dependency_overrides[get_session] = override_get_session
     try:
         client = TestClient(app)
-        first = client.get("/skills", params={"q": "py", "limit": 20})
-        second = client.get("/skills", params={"q": "py", "limit": 20})
+        first = client.get("/api/v1/skills", params={"q": "py", "limit": 20})
+        second = client.get("/api/v1/skills", params={"q": "py", "limit": 20})
     finally:
         app.dependency_overrides.clear()
 
