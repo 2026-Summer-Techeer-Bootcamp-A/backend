@@ -82,6 +82,7 @@ def create_resume_feedback(
         session=session,
         pool=confirmed.get("pool"),
         memo=confirmed.get("memo"),
+        certs=confirmed.get("certs", []),
     )
 
 
