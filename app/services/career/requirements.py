@@ -46,10 +46,17 @@ def _tag_fallback(seed_tags: list[str]) -> list[Requirement]:
 
 def extract_requirements(
     description: str | None, seed_tags: list[str], llm: LLMClient
-) -> list[Requirement]:
+) -> tuple[list[Requirement], bool]:
+    """공고 본문에서 LLM으로 요구사항을 뽑는다.
+
+    반환하는 bool(llm_ok)은 요구사항 목록이 실제로 LLM 원문 판독에서 나왔는지를
+    가리킨다. seed_tags 태그 폴백은 항상 뭔가를 채워 넣어(비어있지 않아) 호출부가
+    "성공"으로 착각하기 쉬웠다 — llm_ok를 별도로 반환해 태그 폴백인데도 조용히
+    degraded=False로 넘어가는 일을 막는다(compare_tool.py가 이 값으로 강등을 판단).
+    """
     body = _description_to_text(description)
     if not body:
-        return _tag_fallback(seed_tags)
+        return _tag_fallback(seed_tags), False
     prompt = (
         f"공고 본문:\n{body}\n\n"
         f"참고 태그(이미 뽑힌 기술): {', '.join(seed_tags) or '없음'}\n\n"
@@ -59,7 +66,7 @@ def extract_requirements(
     out = llm.json(_SYSTEM, prompt, temperature=0.1, max_output_tokens=1536)
     items = (out or {}).get("items")
     if not isinstance(items, list) or not items:
-        return _tag_fallback(seed_tags)
+        return _tag_fallback(seed_tags), False
     result: list[Requirement] = []
     for i, it in enumerate(items):
         if not isinstance(it, dict) or not it.get("text"):
@@ -71,4 +78,6 @@ def extract_requirements(
                 "source_quote": str(it.get("source_quote") or ""),
             }
         )
-    return result or _tag_fallback(seed_tags)
+    if result:
+        return result, True
+    return _tag_fallback(seed_tags), False

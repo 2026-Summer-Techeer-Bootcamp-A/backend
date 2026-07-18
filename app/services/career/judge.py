@@ -37,9 +37,18 @@ def _norm(s: str) -> str:
 
 def judge_requirements(
     requirements: list[Requirement], resume_text: str, llm: LLMClient
-) -> list[Judgment]:
+) -> tuple[list[Judgment], bool]:
+    """요구사항마다 이력서 원문 대비 met/partial/gap을 판정한다.
+
+    반환하는 bool(llm_ok)은 LLM이 실제로 판정을 만들어냈는지를 가리킨다. 아래 루프
+    뒤에서 판정이 누락된 요구를 전부 gap으로 채우기 때문에, LLM이 완전히 실패해도
+    (items가 리스트가 아니거나 요구 id가 하나도 안 맞아도) 반환 리스트 자체는 항상
+    비어있지 않다 — llm_ok 없이는 호출부가 이걸 "판정 성공"으로 오인해 근거 없는
+    전부-gap 결과에 degraded=False를 붙이게 된다. llm_ok는 모델 응답에서 실제 요구
+    id와 매칭된 항목이 하나라도 있었을 때만 True다(기본 gap 채움은 포함하지 않는다).
+    """
     if not requirements:
-        return []
+        return [], False
     req_lines = "\n".join(f'{r["id"]}: {r["text"]}' for r in requirements)
     prompt = (
         f"이력서 원문:\n{resume_text}\n\n요구사항:\n{req_lines}\n\n"
@@ -52,6 +61,7 @@ def judge_requirements(
     norm_resume = _norm(resume_text)
     by_id = {r["id"]: r for r in requirements}
     judged: dict[str, Judgment] = {}
+    llm_ok = False
     if isinstance(items, list):
         for it in items:
             if not isinstance(it, dict):
@@ -73,6 +83,9 @@ def judge_requirements(
                 "rationale": str(it.get("rationale") or ""),
                 "next_step": str(it.get("next_step") or ""),
             }
+            # 할루시네이션 가드로 gap 강등됐더라도 모델이 이 요구를 실제로 판정한
+            # 것이므로 llm_ok는 True다 — False는 오직 아래 기본 gap 채움뿐이다.
+            llm_ok = True
     # 판정이 누락된 요구는 gap으로 채운다(항상 요구 수만큼 반환).
     for r in requirements:
         judged.setdefault(
@@ -85,7 +98,7 @@ def judge_requirements(
                 "next_step": "",
             },
         )
-    return [judged[r["id"]] for r in requirements]
+    return [judged[r["id"]] for r in requirements], llm_ok
 
 
 _WEIGHT = {"met": 1.0, "partial": 0.5, "gap": 0.0}
