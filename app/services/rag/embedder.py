@@ -38,6 +38,18 @@ def _load():
     return _model
 
 
+def warmup() -> bool:
+    """벡터 검색이 켜져 있으면 BGE-M3 모델을 미리 로드한다.
+
+    첫 벡터 질의 때 지연 로딩되는 모델을 시작 시점에 백그라운드로 앞당겨 로드해,
+    첫 사용자 질의가 모델 로딩(CPU 수십 초)을 통째로 떠안지 않게 한다. 벡터 검색이
+    꺼져 있으면 즉시 no-op이다. 로드 성공 여부를 반환한다.
+    """
+    if not settings.enable_vector_search:
+        return False
+    return _load() is not None
+
+
 def embed_query(query: str) -> list[float] | None:
     """쿼리 문자열을 1024차원 L2 정규화 벡터로. 비활성/실패 시 None."""
     if not settings.enable_vector_search or not query.strip():
