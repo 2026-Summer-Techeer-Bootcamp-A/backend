@@ -70,6 +70,7 @@ def list_posting_cards(
     skills: list[str] | None = None,
     industry: str | None = None,
     rich_only: bool = False,
+    include_recent_closed: bool = False,
 ) -> tuple[list[dict], int]:
     owned_skill_ids = (
         get_resume_skill_ids(session, resume_id=resume_id, user_id=user_id)
@@ -97,6 +98,7 @@ def list_posting_cards(
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
         candidate_career_max=candidate_career_max,
+        include_recent_closed=include_recent_closed,
     )
     postings = _get_filtered_postings(
         session=session,
@@ -114,6 +116,7 @@ def list_posting_cards(
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
         candidate_career_max=candidate_career_max,
+        include_recent_closed=include_recent_closed,
         limit=page_size,
         offset=(page - 1) * page_size,
     )
@@ -206,22 +209,31 @@ def _apply_posting_filters(
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
     candidate_career_max: int | None = None,
+    include_recent_closed: bool = False,
 ):
     """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
     실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
     stmt = stmt.where(Posting.is_deleted.is_(False))
-    # 마감일이 지난 공고는 기본적으로 목록에서 제외한다. 마감일 자체가 없는 공고는
-    # "상시채용"으로 추정하되, 게시일이 최근 _OPEN_NULL_CLOSE_DATE_WINDOW_DAYS일
-    # 이내인 것만 열려있다고 본다. 게시일도 없거나 오래된 공고는 마감일 파싱 실패로
-    # 죽은 공고일 가능성이 높아 무기한 유지하면 실제로는 닫힌 공고가 목록에 쌓인다.
-    stmt = stmt.where(
-        (Posting.close_date >= date.today())
-        | (
-            Posting.close_date.is_(None)
-            & Posting.post_date.isnot(None)
-            & (Posting.post_date >= date.today() - timedelta(days=_OPEN_NULL_CLOSE_DATE_WINDOW_DAYS))
+    if include_recent_closed:
+        # "지금 지원 가능한 공고"가 아니라 "이 회사가 최근에 어떤 기술을 원했는지"가
+        # 목적인 조회(예: 목표 기업 추천)에서 쓴다. 마감 여부는 안 보고, 올해·작년에
+        # 게시된 공고면 마감됐어도 포함한다 — 작년 채용 공고의 요구 기술이 올해와
+        # 크게 다르지 않으므로 목표를 세우는 데는 여전히 유효한 참고 자료다.
+        recent_years_cutoff = date(date.today().year - 1, 1, 1)
+        stmt = stmt.where(Posting.post_date.isnot(None) & (Posting.post_date >= recent_years_cutoff))
+    else:
+        # 마감일이 지난 공고는 기본적으로 목록에서 제외한다. 마감일 자체가 없는 공고는
+        # "상시채용"으로 추정하되, 게시일이 최근 _OPEN_NULL_CLOSE_DATE_WINDOW_DAYS일
+        # 이내인 것만 열려있다고 본다. 게시일도 없거나 오래된 공고는 마감일 파싱 실패로
+        # 죽은 공고일 가능성이 높아 무기한 유지하면 실제로는 닫힌 공고가 목록에 쌓인다.
+        stmt = stmt.where(
+            (Posting.close_date >= date.today())
+            | (
+                Posting.close_date.is_(None)
+                & Posting.post_date.isnot(None)
+                & (Posting.post_date >= date.today() - timedelta(days=_OPEN_NULL_CLOSE_DATE_WINDOW_DAYS))
+            )
         )
-    )
 
     if pool is not None:
         stmt = stmt.where(Posting.pool == pool)
@@ -354,6 +366,7 @@ def _count_filtered_postings(
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
     candidate_career_max: int | None = None,
+    include_recent_closed: bool = False,
 ) -> int:
     # 이 COUNT는 선택도가 40.6%(229,553/565,191)라 인덱스를 태워도 postgres가 seq scan을
     # 고르는 게 실제로 더 빠르다(실측: 커버링 인덱스를 만들어도 플래너가 거부) — 그래서
@@ -382,6 +395,7 @@ def _count_filtered_postings(
                 "rich_only": rich_only,
                 "match_only": match_only,
                 "min_match": min_match,
+                "include_recent_closed": include_recent_closed,
             },
         )
         cached = get_cached(cache_key, _PostingCountCache)
@@ -406,6 +420,7 @@ def _count_filtered_postings(
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
         candidate_career_max=candidate_career_max,
+        include_recent_closed=include_recent_closed,
     )
     total = session.execute(stmt).scalar_one()
 
@@ -434,6 +449,7 @@ def _get_filtered_postings(
     min_match: float | None = None,
     owned_skill_ids: set[int] | None = None,
     candidate_career_max: int | None = None,
+    include_recent_closed: bool = False,
 ) -> list[Posting]:
     stmt = _apply_posting_filters(
         select(Posting),
@@ -450,6 +466,7 @@ def _get_filtered_postings(
         min_match=min_match,
         owned_skill_ids=owned_skill_ids,
         candidate_career_max=candidate_career_max,
+        include_recent_closed=include_recent_closed,
     )
 
     if sort == "match" and owned_skill_ids is not None:
