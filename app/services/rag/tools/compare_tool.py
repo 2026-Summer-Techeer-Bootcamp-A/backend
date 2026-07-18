@@ -194,7 +194,7 @@ def resume_posting_llm_compare(
                 "text": req["text"],
                 "source_quote": req["source_quote"],
                 "verdict": judgment["verdict"],
-                "resume_quote": judgment["resume_quote"],
+                "quote": judgment["quote"],
                 "rationale": judgment["rationale"],
                 "next_step": judgment["next_step"],
             }
@@ -203,6 +203,14 @@ def resume_posting_llm_compare(
     summary = _build_summary(rows)
     compare = {
         "posting_title": posting_title,
+        # base_role/base_title/target_role/target_title: posting_posting_llm_compare와
+        # 같은 뼈대로 프론트가 "기준 문서 vs 판정 대상 문서"를 공통 컴포넌트로 렌더할 수
+        # 있게 한다. 이력서 대 공고 비교에서는 기준이 공고(요구를 추출한 쪽), 판정 대상이
+        # 이력서다.
+        "base_role": "공고",
+        "base_title": posting_title,
+        "target_role": "내 이력서",
+        "target_title": "",
         "score": score,
         "counts": counts,
         "summary": summary,
@@ -267,6 +275,114 @@ def posting_posting_compare(
             "label": "공고 간 요구 기술 겹침 비교",
         },
         "n": shared_n + only_a_n + only_b_n,
+        "facts": facts,
+    }
+
+
+def _degrade_to_posting_tag_compare(
+    session: Session, posting_id_a: int, posting_id_b: int
+) -> dict | None:
+    """공고 대 공고 LLM 판정 경로가 원문 부재나 빈 결과로 이어지지 못할 때 기존
+    태그 교집합 비교(posting_posting_compare)로 강등한다. degraded 플래그를 실어
+    프론트 배지가 뜨게 한다(조용한 실패 금지) — _degrade_to_tag_compare와 동일 패턴."""
+    base = posting_posting_compare(session, posting_id_a=posting_id_a, posting_id_b=posting_id_b)
+    if base is None:
+        return None
+    base["tool_result"]["compare"]["degraded"] = True
+    return base
+
+
+def posting_posting_llm_compare(
+    session: Session,
+    posting_id_a: int,
+    posting_id_b: int,
+    llm: LLMClient,
+) -> dict | None:
+    """공고 A 원문에서 뽑은 요구사항별로 공고 B가 얼마나 충족하는지 LLM으로 판정한다.
+
+    resume_posting_llm_compare와 같은 뼈대다: 공고 A를 기준으로 요구사항을 추출하고,
+    judge_requirements(target_label="비교 대상 공고")로 공고 B 원문을 대조해 met/partial/gap을
+    매긴다. 요구 추출이나 판정이 비어있거나 LLM이 아니라 태그 폴백/기본 gap 채움으로만
+    채워졌다면(llm_ok=False) 기존 태그 교집합 비교(posting_posting_compare)로 강등하고
+    degraded=True를 싣는다.
+    """
+    try:
+        title_a, seed_tags_a = get_posting_skill_names(session, posting_id_a)
+        # seed_tags_b는 쓰지 않는다 — 요구사항은 공고 A 기준으로만 추출하고, 공고 B는
+        # judge_requirements의 판정 대상 원문으로만 쓰인다.
+        title_b, _seed_tags_b = get_posting_skill_names(session, posting_id_b)
+    except HTTPException:
+        return None
+
+    description_a, source_a = _get_posting_description(session, posting_id_a)
+    normalized_a = _normalize_description(description_a, source_a, title_a)
+    description_b, source_b = _get_posting_description(session, posting_id_b)
+    normalized_b = _normalize_description(description_b, source_b, title_b)
+
+    requirements, req_llm_ok = extract_requirements(normalized_a, seed_tags_a, llm)
+    if not requirements or not req_llm_ok:
+        # requirements가 비었거나(원문 부재) seed_tags 폴백으로만 채워졌으면(req_llm_ok=False)
+        # resume_posting_llm_compare와 동일하게 태그 기반 비교로 정직하게 강등한다.
+        return _degrade_to_posting_tag_compare(session, posting_id_a, posting_id_b)
+
+    judgments, judge_llm_ok = judge_requirements(
+        requirements, normalized_b or "", llm, target_label="비교 대상 공고"
+    )
+    if not judgments or not judge_llm_ok:
+        return _degrade_to_posting_tag_compare(session, posting_id_a, posting_id_b)
+
+    score = weighted_score(judgments)
+    counts = {"met": 0, "partial": 0, "gap": 0}
+    for judgment in judgments:
+        counts[judgment["verdict"]] = counts.get(judgment["verdict"], 0) + 1
+
+    by_req_id = {req["id"]: req for req in requirements}
+    rows = []
+    for judgment in judgments:
+        req = by_req_id.get(judgment["req_id"], {"id": judgment["req_id"], "text": "", "source_quote": ""})
+        rows.append(
+            {
+                "id": req["id"],
+                "text": req["text"],
+                "source_quote": req["source_quote"],
+                "verdict": judgment["verdict"],
+                "quote": judgment["quote"],
+                "rationale": judgment["rationale"],
+                "next_step": judgment["next_step"],
+            }
+        )
+
+    summary = _build_summary(rows)
+    compare = {
+        "base_role": "공고",
+        "base_title": title_a,
+        "target_role": "비교 공고",
+        "target_title": title_b,
+        "score": score,
+        "counts": counts,
+        "summary": summary,
+        "requirements": rows,
+        "degraded": False,
+    }
+    facts = (
+        f"{title_a} 대비 {title_b} LLM 판정 — met {counts['met']}건, "
+        f"partial {counts['partial']}건, gap {counts['gap']}건, 가중 점수 {score}"
+    )
+
+    return {
+        "tool": "compare",
+        "tool_result": {
+            "kind": "posting_posting_llm",
+            "label": "공고 간 요구사항 LLM 판정",
+            "items": [],
+            "compare": compare,
+        },
+        "citation": {
+            "type": "compare",
+            "ref": f"{title_a} vs {title_b}",
+            "label": "공고 원문 대비 공고 요구사항 LLM 판정",
+        },
+        "n": len(rows),
         "facts": facts,
     }
 
