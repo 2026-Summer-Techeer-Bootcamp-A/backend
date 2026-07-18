@@ -33,7 +33,14 @@ class LLMClient(Protocol):
     last_debug: dict[str, Any] | None
     call_count: int
 
-    def json(self, system: str, prompt: str, temperature: float = 0.2) -> dict | None: ...
+    def json(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.2,
+        *,
+        max_output_tokens: int | None = None,
+    ) -> dict | None: ...
 
     def text(self, system: str, prompt: str, temperature: float = 0.4) -> str | None: ...
 
@@ -83,20 +90,31 @@ class GeminiClient:
         # last_debug 하나만으로는 이전 단계의 값이 남아있는 건지 이번 단계 값인지 구분이 안 된다.
         self.call_count = 0
 
-    def _call(self, system: str, prompt: str, temperature: float) -> str | None:
+    def _call(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float,
+        *,
+        max_output_tokens: int | None = None,
+        response_mime_type: str | None = None,
+    ) -> str | None:
         if not settings.gemini_api_key:
             return None
         self.call_count += 1
+        gen_cfg: dict[str, Any] = {
+            "temperature": temperature,
+            # thinkingLevel은 generationConfig 최상위가 아니라 반드시 thinkingConfig
+            # 안에 중첩되어야 한다. 최상위에 두면 API가 HTTP 400 "Unknown name"을 반환한다.
+            "thinkingConfig": {"thinkingLevel": settings.gemini_thinking_level},
+            "maxOutputTokens": max_output_tokens or settings.gemini_max_output_tokens,
+        }
+        if response_mime_type:
+            gen_cfg["responseMimeType"] = response_mime_type
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "systemInstruction": {"parts": [{"text": system}]},
-            "generationConfig": {
-                "temperature": temperature,
-                # thinkingLevel은 generationConfig 최상위가 아니라 반드시 thinkingConfig
-                # 안에 중첩되어야 한다. 최상위에 두면 API가 HTTP 400 "Unknown name"을 반환한다.
-                "thinkingConfig": {"thinkingLevel": settings.gemini_thinking_level},
-                "maxOutputTokens": settings.gemini_max_output_tokens,
-            },
+            "generationConfig": gen_cfg,
         }
         req = urllib.request.Request(
             GEMINI_URL_TMPL.format(model=settings.gemini_model),
@@ -146,8 +164,21 @@ class GeminiClient:
         }
         return None
 
-    def json(self, system: str, prompt: str, temperature: float = 0.2) -> dict | None:
-        text = self._call(system, prompt, temperature)
+    def json(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.2,
+        *,
+        max_output_tokens: int | None = None,
+    ) -> dict | None:
+        text = self._call(
+            system,
+            prompt,
+            temperature,
+            max_output_tokens=max_output_tokens,
+            response_mime_type="application/json",
+        )
         return _parse_json_object(text) if text else None
 
     def text(self, system: str, prompt: str, temperature: float = 0.4) -> str | None:
@@ -161,7 +192,14 @@ class NullClient:
         self.last_debug: dict[str, Any] | None = None
         self.call_count = 0
 
-    def json(self, system: str, prompt: str, temperature: float = 0.2) -> dict | None:
+    def json(
+        self,
+        system: str,
+        prompt: str,
+        temperature: float = 0.2,
+        *,
+        max_output_tokens: int | None = None,
+    ) -> dict | None:
         return None
 
     def text(self, system: str, prompt: str, temperature: float = 0.4) -> str | None:
