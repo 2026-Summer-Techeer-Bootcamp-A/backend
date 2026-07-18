@@ -120,7 +120,7 @@ class _FakeLLM:
                     {
                         "req_id": "R1",
                         "verdict": "met",
-                        "resume_quote": "Python 백엔드 개발자",
+                        "quote": "Python 백엔드 개발자",
                         "rationale": "일치",
                     },
                 ]
