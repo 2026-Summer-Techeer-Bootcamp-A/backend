@@ -214,6 +214,77 @@ def test_run_chat_events_answers_when_resume_attached(session: Session) -> None:
     assert "이력서를 먼저 첨부" not in final["answer"]
 
 
+def test_run_chat_events_resume_text_with_single_posting_bypasses_missing_resume_guard(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """세션 범위 이력서 원문(resume_text)과 공고 1개가 함께 오면, 저장된 이력서가 없어
+    owned_skill_ids가 비어 있어도 미첨부 가드가 조기 종료하면 안 된다 — _dispatch의
+    resume_posting_llm_compare 분기(첨부 우선 설계)가 원문을 직접 읽고 판정하기
+    때문이다. 회귀 대상: 이 조합에서 가드가 무조건 "이력서를 먼저 첨부해 주세요"로
+    조기 종료해 실제 비교 도구가 아예 실행되지 못했던 버그.
+
+    compare_tool.resume_posting_llm_compare는 실제 Gemini 호출이 필요해 이 단위
+    테스트에서는 _dispatch를 스텁으로 갈아끼우고, 가드를 통과해 _dispatch가 정확한
+    인자(resume_text/posting_ids/owned_skill_ids)로 호출되는지만 확인한다."""
+    posting_id = session.info["python_id"]  # 유효한 id이기만 하면 되므로 스킬 id를 재사용
+    calls: list[dict] = []
+
+    def fake_dispatch(sess: Session, plan: Plan, **kwargs: object) -> tuple[list[dict], bool]:
+        calls.append(kwargs)
+        return (
+            [
+                {
+                    "tool": "compare",
+                    "tool_result": {
+                        "kind": "resume_posting_llm",
+                        "label": "이력서 대비 공고 요구사항(LLM 판정)",
+                        "items": [],
+                        "compare": {
+                            "posting_title": "백엔드",
+                            "score": 50.0,
+                            "counts": {"met": 1, "partial": 0, "gap": 1},
+                            "summary": "요약",
+                            "requirements": [],
+                            "degraded": False,
+                        },
+                    },
+                    "citation": {
+                        "type": "compare",
+                        "ref": "이력서 vs 백엔드",
+                        "label": "이력서 원문 대비 공고 요구사항 LLM 판정",
+                    },
+                    "n": 2,
+                    "facts": "met 1건, gap 1건",
+                }
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(rag_pipeline, "_dispatch", fake_dispatch)
+
+    events = list(
+        rag_pipeline.run_chat_events(
+            session,
+            "내 이력서로 지원 가능한 공고 얼마나 돼?",  # 휴리스틱상 resume_coverage로 분류됨
+            pool="domestic",
+            owned_skill_ids=None,
+            posting_ids=[posting_id],
+            resume_text="지원 직무: 백엔드 개발자, 보유 기술: Python, FastAPI",
+        )
+    )
+
+    assert len(calls) == 1  # 가드에서 조기 종료됐다면 _dispatch는 호출조차 안 된다
+    assert calls[0]["resume_text"] == "지원 직무: 백엔드 개발자, 보유 기술: Python, FastAPI"
+    assert calls[0]["posting_ids"] == [posting_id]
+    assert not calls[0]["owned_skill_ids"]  # None(저장된 이력서 미첨부) 그대로 전달돼야 한다
+
+    kinds = [e["type"] for e in events]
+    assert "result" in kinds  # 조기 종료(plan, final만)가 아니라 도구 결과가 있어야 한다
+    final = events[-1]
+    assert final["type"] == "final"
+    assert "이력서를 먼저 첨부" not in final["answer"]
+
+
 def test_run_chat_events_non_resume_question_ignores_owned_skill_ids(session: Session) -> None:
     """일반 질문 경로는 owned_skill_ids를 완전히 무시해야 한다(byte-for-byte 동일 동작)."""
     without = list(rag_pipeline.run_chat_events(session, "요즘 뭐가 제일 인기야?", pool="domestic"))
