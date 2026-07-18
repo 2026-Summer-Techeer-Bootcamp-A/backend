@@ -136,6 +136,7 @@ def test_confirm_resume_stores_confirmed_input_in_session(
                 {"canonical": "Python", "category": "language", "in_dict": True},
                 {"canonical": "AWS", "category": "devops", "in_dict": True},
             ],
+            "certs": [],
             "position": "backend",
             "career_min": 3,
             "career_max": 5,
@@ -181,7 +182,7 @@ def test_resume_feedback_uses_confirmed_session_without_auth(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "app.routers.resume.generate_resume_feedback",
-        lambda *, skills, position, session, pool, memo=None: {
+        lambda *, skills, position, session, pool, memo=None, certs=None: {
             "feedback": ["Docker 경험을 프로젝트 설명에 보강해보세요."],
             "questions": ["Python을 선택한 이유를 설명해주세요."],
             "model": "primary",
@@ -1125,10 +1126,14 @@ def test_generate_resume_feedback_includes_memo_in_prompt(monkeypatch) -> None:
 
     captured_prompts = []
 
-    def fake_generate_with_gemini(*, skills, position, market_skills, memo=None):
+    def fake_generate_with_gemini(*, skills, position, market_skills, memo=None, certs=None):
         captured_prompts.append(
             resume_feedback._build_prompt(
-                skills=skills, position=position, market_skills=market_skills, memo=memo
+                skills=skills,
+                position=position,
+                market_skills=market_skills,
+                memo=memo,
+                certs=certs,
             )
         )
         return (["feedback"], ["question"])
@@ -1148,3 +1153,148 @@ def test_generate_resume_feedback_includes_memo_in_prompt(monkeypatch) -> None:
         )
 
     assert "3년차 백엔드" in captured_prompts[0]
+
+
+def test_resume_confirm_request_defaults_certs_to_empty_list() -> None:
+    from app.schemas.resume import ResumeConfirmRequest
+
+    payload = ResumeConfirmRequest(
+        skills=[{"canonical": "Python", "category": "language", "in_dict": True}],
+        pool="global",
+    )
+
+    assert payload.certs == []
+
+
+def test_confirm_resume_stores_certs_in_session(
+    monkeypatch, client_with_skill_dictionary: TestClient
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_create_resume_confirm_session(payload: dict[str, object], ttl: int) -> str:
+        captured["payload"] = payload
+        return "session-id"
+
+    monkeypatch.setattr(
+        "app.routers.resume.create_resume_confirm_session",
+        fake_create_resume_confirm_session,
+    )
+
+    response = client_with_skill_dictionary.post(
+        "/api/v1/resume/confirm",
+        json={
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            "certs": [
+                {"name": "AWS Certified Solutions Architect", "in_dict": True},
+            ],
+            "pool": "global",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["payload"]["certs"] == [
+        {"name": "AWS Certified Solutions Architect", "in_dict": True},
+    ]
+
+
+def test_resume_feedback_passes_confirmed_certs_to_generate_feedback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.routers.resume.get_resume_confirm_session",
+        lambda session_id: {
+            "skills": [
+                {"canonical": "Python", "category": "language", "in_dict": True},
+            ],
+            "certs": [{"name": "AWS Certified Solutions Architect", "in_dict": True}],
+            "position": "backend",
+            "pool": "global",
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_generate_resume_feedback(*, skills, position, session, pool, memo=None, certs=None):
+        captured["certs"] = certs
+        return {
+            "feedback": ["f"],
+            "questions": ["q"],
+            "model": "primary",
+            "degraded": False,
+        }
+
+    monkeypatch.setattr(
+        "app.routers.resume.generate_resume_feedback",
+        fake_generate_resume_feedback,
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/resume/feedback",
+        json={"session_id": "b1f9c0e2", "position": "backend"},
+    )
+
+    assert response.status_code == 200
+    assert captured["certs"] == [{"name": "AWS Certified Solutions Architect", "in_dict": True}]
+
+
+def test_build_prompt_includes_cert_names_when_certs_present() -> None:
+    from app.services import resume_feedback
+
+    prompt = resume_feedback._build_prompt(
+        skills=[{"canonical": "Python", "category": "language", "in_dict": True}],
+        position="backend",
+        market_skills=["Docker"],
+        certs=[{"name": "AWS Certified Solutions Architect", "in_dict": True}],
+    )
+
+    assert "AWS Certified Solutions Architect" in prompt
+
+
+def test_build_prompt_omits_cert_line_when_certs_empty() -> None:
+    from app.services import resume_feedback
+
+    prompt = resume_feedback._build_prompt(
+        skills=[{"canonical": "Python", "category": "language", "in_dict": True}],
+        position="backend",
+        market_skills=["Docker"],
+        certs=[],
+    )
+
+    assert "보유 자격증" not in prompt
+
+
+def test_parse_json_object_parses_valid_json_unchanged() -> None:
+    from app.services import resume_feedback
+
+    result = resume_feedback._parse_json_object('{"feedback": ["a"], "questions": ["b"]}')
+
+    assert result == {"feedback": ["a"], "questions": ["b"]}
+
+
+def test_parse_json_object_repairs_unescaped_inner_quote() -> None:
+    from app.services import resume_feedback
+
+    broken = '{"feedback": ["부분적으로 "React" 언급됨"], "questions": ["q1"]}'
+
+    result = resume_feedback._parse_json_object(broken)
+
+    assert result == {
+        "feedback": ['부분적으로 "React" 언급됨'],
+        "questions": ["q1"],
+    }
+
+
+def test_parse_json_object_accepts_raw_literal_newline_via_strict_false() -> None:
+    from app.services import resume_feedback
+
+    broken = '{"feedback": ["line one\nline two"], "questions": ["q1"]}'
+
+    result = resume_feedback._parse_json_object(broken)
+
+    assert result == {"feedback": ["line one\nline two"], "questions": ["q1"]}
+
+
+def test_parse_json_object_returns_none_for_unparseable_garbage() -> None:
+    from app.services import resume_feedback
+
+    assert resume_feedback._parse_json_object("not json at all {{{") is None
