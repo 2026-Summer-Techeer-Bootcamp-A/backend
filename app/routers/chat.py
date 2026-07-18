@@ -11,6 +11,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.core.deps import SessionDep
+from app.core.redis import get_resume_text_from_session
 from app.routers.match import get_user_from_optional_authorization
 from app.services.match import get_skill_ids_from_resume
 from app.services.rag.pipeline import run_chat, run_chat_events
@@ -35,6 +36,14 @@ def _resolve_owned_skill_ids(
     return get_skill_ids_from_resume(session=session, resume_id=resume_id, current_user=current_user)
 
 
+def _resolve_resume_text(resume_session_id: str | None) -> str | None:
+    """resume_session_id가 없거나 세션이 만료됐으면 None — pipeline._dispatch가 이를
+    보고 기존 태그 기반 비교로 우아하게 강등한다(조용한 실패 없이)."""
+    if resume_session_id is None:
+        return None
+    return get_resume_text_from_session(resume_session_id)
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(
     body: ChatRequest,
@@ -42,6 +51,7 @@ def chat(
     authorization: Annotated[str | None, Header()] = None,
 ) -> ChatResponse:
     owned_skill_ids = _resolve_owned_skill_ids(session, body.resume_id, authorization)
+    resume_text = _resolve_resume_text(body.resume_session_id)
     return run_chat(
         session,
         body.question,
@@ -49,6 +59,7 @@ def chat(
         verbose=body.verbose,
         owned_skill_ids=owned_skill_ids,
         posting_ids=body.posting_ids,
+        resume_text=resume_text,
     )
 
 
@@ -59,6 +70,7 @@ def chat_stream(
     authorization: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     owned_skill_ids = _resolve_owned_skill_ids(session, body.resume_id, authorization)
+    resume_text = _resolve_resume_text(body.resume_session_id)
 
     def gen() -> Iterator[str]:
         for event in run_chat_events(
@@ -68,6 +80,7 @@ def chat_stream(
             verbose=body.verbose,
             owned_skill_ids=owned_skill_ids,
             posting_ids=body.posting_ids,
+            resume_text=resume_text,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 

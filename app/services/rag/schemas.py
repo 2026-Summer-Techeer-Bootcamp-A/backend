@@ -21,6 +21,10 @@ class ChatRequest(BaseModel):
     # 쓰인다 — resume_id와 함께 오면 이력서 vs 공고, 단독으로 2개 오면 공고 vs 공고
     # 비교로 라우팅된다(app/services/rag/pipeline.py _dispatch 참고).
     posting_ids: list[int] | None = None
+    # 이력서 확인 세션 id(POST /resume/confirm 응답의 session_id). 있으면 세션 payload에
+    # 실린 이력서 원문을 조회해 커리어 적합도 LLM 판정(resume_posting_llm_compare)을
+    # 태운다. 세션이 없거나 만료됐으면 pipeline이 기존 태그 기반 비교로 강등한다.
+    resume_session_id: str | None = None
 
 
 class Plan(BaseModel):
@@ -72,6 +76,10 @@ class ToolResult(BaseModel):
         "resume_posting",
         "posting_posting",
         "resume_market",
+        # 커리어 적합도 Split Diff: 태그 교집합이 아니라 이력서/공고 원문을 LLM으로 대조해
+        # 요구사항별 met/partial/gap을 판정한 결과. resume_posting과 달리 requirements 배열에
+        # 원문 인용까지 담는다(app/services/rag/tools/compare_tool.py resume_posting_llm_compare).
+        "resume_posting_llm",
         # K3: 실제 공고 목록(이력서 추천, 의미 유사 검색) — items 각각이 posting id를
         # 들고 있어 프론트가 통계 막대그래프 대신 클릭 가능한 공고 카드로 렌더링한다.
         "posting_list",
