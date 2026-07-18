@@ -100,6 +100,10 @@ def get_postings(
     company: Annotated[
         str | None, Query(min_length=1, max_length=200, description="회사명 부분일치(제목은 보지 않음)")
     ] = None,
+    include_recent_closed: Annotated[
+        bool,
+        Query(description="true면 마감 여부와 무관하게 올해·작년에 게시된 공고까지 포함(지원 가능 여부가 아닌 참고용 조회)"),
+    ] = False,
     skills: Annotated[str | None, Query(description="쉼표로 구분한 기술명(하나 이상 일치)")] = None,
     industry: Annotated[str | None, Query(description="업종 부분일치(Posting.industry)")] = None,
     rich_only: Annotated[bool, Query(description="설명이 충분히 상세한 공고만 조회")] = False,
@@ -144,6 +148,7 @@ def get_postings(
         min_match=min_match,
         q=q,
         company=company,
+        include_recent_closed=include_recent_closed,
         skills=[skill.strip() for skill in skills.split(",") if skill.strip()] if skills else None,
         industry=industry,
         rich_only=rich_only,
