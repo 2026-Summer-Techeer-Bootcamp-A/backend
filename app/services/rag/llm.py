@@ -64,6 +64,22 @@ def _extract_text(body: dict[str, Any]) -> str:
     return "\n".join(texts)
 
 
+def _thinking_config(model: str, level: str) -> dict[str, Any] | None:
+    """모델 계열에 맞는 thinking 설정을 고른다.
+
+    gemini-2.5 계열은 thinkingLevel을 모르고 thinkingBudget(정수)만 받는다. thinkingLevel을
+    보내면 HTTP 400 "Thinking level is not supported for this model."로 모든 호출이 실패한다.
+    gemini-3 계열은 thinkingLevel(문자열)을 받는다. 계열을 모르면 thinkingConfig를 아예
+    빼서(생략) 어느 모델에서도 400을 내지 않게 안전하게 둔다.
+    """
+    if model.startswith("gemini-2.5") or model.startswith("gemini-2.0"):
+        # minimal은 사고를 끄고(0), 그 외 단계는 동적 예산(-1)으로 모델이 알아서 정하게 둔다.
+        return {"thinkingBudget": 0 if level == "minimal" else -1}
+    if model.startswith("gemini-3"):
+        return {"thinkingLevel": level}
+    return None
+
+
 def _parse_json_object(text: str) -> dict[str, Any] | None:
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -104,11 +120,11 @@ class GeminiClient:
         self.call_count += 1
         gen_cfg: dict[str, Any] = {
             "temperature": temperature,
-            # thinkingLevel은 generationConfig 최상위가 아니라 반드시 thinkingConfig
-            # 안에 중첩되어야 한다. 최상위에 두면 API가 HTTP 400 "Unknown name"을 반환한다.
-            "thinkingConfig": {"thinkingLevel": settings.gemini_thinking_level},
             "maxOutputTokens": max_output_tokens or settings.gemini_max_output_tokens,
         }
+        thinking = _thinking_config(settings.gemini_model, settings.gemini_thinking_level)
+        if thinking is not None:
+            gen_cfg["thinkingConfig"] = thinking
         if response_mime_type:
             gen_cfg["responseMimeType"] = response_mime_type
         body = {
