@@ -256,9 +256,15 @@ def run_chat_events(
         # resume_market도 resume_gap/resume_coverage와 마찬가지로 이력서 없이는 성립할
         # 수 없는 질문이라 같은 취급을 한다(_dispatch의 세 번째 분기도 owned_skill_ids가
         # 없으면 애초에 안 타므로, 여기서 걸러주지 않으면 무관한 top_skills로 새어나간다).
+        # 단, 세션 범위 이력서 원문(resume_text)과 공고 한 개가 함께 온 경우는 예외다 —
+        # 이때는 owned_skill_ids(저장된 이력서의 스킬 태그)가 비어 있어도 _dispatch의
+        # resume_posting_llm_compare 분기(첨부가 텍스트 인텐트보다 우선한다는 설계,
+        # 위 _dispatch의 첫 주석 블록 참고)가 원문을 직접 읽고 판정하므로 도구 실행
+        # 전에 조기 종료하면 오히려 정상 요청을 막게 된다.
         if (
             p.intent in ("resume_gap", "resume_coverage", "resume_market", "resume_recommend")
             and not owned_skill_ids
+            and not (resume_text and posting_ids and len(posting_ids) == 1)
         ):
             answer = (
                 "이력서를 먼저 첨부해 주세요. 첨부하면 이력서 기준으로 부족한 기술과 "
