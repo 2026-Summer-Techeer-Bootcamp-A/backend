@@ -144,7 +144,9 @@ def resume_posting_llm_compare(
 ) -> dict | None:
     """이력서 원문과 공고 원문을 LLM으로 대조해 요구사항별 met/partial/gap을 판정한다.
 
-    이력서 원문이 없거나(세션 만료 등) LLM이 요구/판정을 하나도 만들어내지 못하면
+    이력서 원문이 없거나(세션 만료 등), 요구사항/판정 목록이 비어있거나, 혹은
+    비어있지는 않아도 LLM이 아니라 태그 폴백/기본 gap 채움으로만 채워졌다면(=
+    extract_requirements/judge_requirements가 llm_ok=False를 돌려준 경우) 전부
     기존 태그 교집합 비교(resume_posting_compare)로 강등하고 degraded=True를 싣는다.
     """
     if not resume_text:
@@ -158,12 +160,23 @@ def resume_posting_llm_compare(
     description, source = _get_posting_description(session, posting_id)
     normalized_description = _normalize_description(description, source, posting_title)
 
-    requirements = extract_requirements(normalized_description, seed_tags, llm)
+    requirements, req_llm_ok = extract_requirements(normalized_description, seed_tags, llm)
     if not requirements:
         return _degrade_to_tag_compare(session, owned_skill_ids, posting_id)
+    if not req_llm_ok:
+        # 요구사항 목록 자체는 비어있지 않지만(seed_tags 태그 폴백) LLM이 원문을
+        # 읽어 뽑아낸 게 아니다 — 그대로 이어가면 태그 텍스트를 요구사항인 척
+        # 내보내면서 degraded=False를 붙이는 "근거 없는 확신"이 된다. 정직하게
+        # 태그 기반 비교로 강등한다.
+        return _degrade_to_tag_compare(session, owned_skill_ids, posting_id)
 
-    judgments = judge_requirements(requirements, resume_text, llm)
+    judgments, judge_llm_ok = judge_requirements(requirements, resume_text, llm)
     if not judgments:
+        return _degrade_to_tag_compare(session, owned_skill_ids, posting_id)
+    if not judge_llm_ok:
+        # 판정도 마찬가지다 — LLM이 죽으면 judge_requirements는 전부 gap으로
+        # 채운 목록을 돌려주는데, 이걸 그대로 "0건 충족" 확정 결과로 보여주면
+        # 이 기능 전체가 없애려던 "근거 없는 0%" 문제가 그대로 재현된다.
         return _degrade_to_tag_compare(session, owned_skill_ids, posting_id)
 
     score = weighted_score(judgments)

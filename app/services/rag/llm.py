@@ -86,6 +86,23 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
         stripped = stripped.strip("`")
         if stripped.lower().startswith("json"):
             stripped = stripped[4:]
+    stripped = stripped.strip()
+
+    # extract_requirements/judge_requirements는 프롬프트에서 "items 배열로 답한다"고
+    # 요청하는데, 모델이 이를 곧이곧대로 따라 최상위가 객체가 아니라 배열인 응답을
+    # 종종 내놓는다. 아래 중괄호 스캔은 배열({로 시작하지 않음)을 다루지 못해 이런
+    # 응답을 통째로 놓쳤다 — 먼저 전체를 그대로 파싱해보고, 배열이면 items로 감싸서
+    # 호출부(둘 다 "items" 키를 읽는다)가 그대로 쓸 수 있게 한다.
+    try:
+        whole = json.loads(stripped)
+    except (ValueError, TypeError):
+        whole = None
+    if isinstance(whole, dict):
+        return whole
+    if isinstance(whole, list):
+        return {"items": whole}
+
+    # 통째로는 못 읽었을 때만(앞뒤에 설명 문장이 붙은 경우 등) 중괄호 범위를 긁어 재시도한다.
     start = stripped.find("{")
     end = stripped.rfind("}")
     if start == -1 or end == -1 or end < start:

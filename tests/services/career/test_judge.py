@@ -40,12 +40,29 @@ def test_guard_downgrades_hallucinated_quote():
             ]
         }
     )
-    out = judge_requirements(REQS, RESUME, llm)
+    out, ok = judge_requirements(REQS, RESUME, llm)
+    assert ok is True  # 모델이 R1/R2 둘 다 실제로 판정했다(가드로 R2가 gap 강등돼도 무관)
     r1 = next(j for j in out if j["req_id"] == "R1")
     r2 = next(j for j in out if j["req_id"] == "R2")
     assert r1["verdict"] == "met"
     assert r2["verdict"] == "gap"  # 원문에 없는 인용이라 강등
     assert r2["resume_quote"] == ""
+
+
+def test_judge_llm_ok_false_when_llm_returns_nothing_usable():
+    """LLM이 죽어서(None) items를 하나도 못 만들면, 요구 수만큼 기본 gap으로 채워져
+    반환 리스트 자체는 비어있지 않지만 llm_ok는 False여야 한다 — compare_tool이 이걸로
+    "판정 성공"과 "전부 기본 gap 채움"을 구분해 정직하게 강등한다."""
+    llm = _FakeLLM(None)
+    out, ok = judge_requirements(REQS, RESUME, llm)
+    assert ok is False
+    assert [j["verdict"] for j in out] == ["gap", "gap"]
+
+
+def test_judge_requirements_empty_returns_false():
+    out, ok = judge_requirements([], RESUME, _FakeLLM(None))
+    assert out == []
+    assert ok is False
 
 
 def test_weighted_score_math():
