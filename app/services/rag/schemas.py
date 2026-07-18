@@ -80,6 +80,10 @@ class ToolResult(BaseModel):
         # 요구사항별 met/partial/gap을 판정한 결과. resume_posting과 달리 requirements 배열에
         # 원문 인용까지 담는다(app/services/rag/tools/compare_tool.py resume_posting_llm_compare).
         "resume_posting_llm",
+        # 위와 동일한 LLM 판정 로직을 공고 대 공고 비교에 재사용한 결과
+        # (app/services/rag/tools/compare_tool.py posting_posting_llm_compare). posting_posting
+        # (태그 교집합)과 달리 requirements 배열에 원문 인용을 담는다.
+        "posting_posting_llm",
         # K3: 실제 공고 목록(이력서 추천, 의미 유사 검색) — items 각각이 posting id를
         # 들고 있어 프론트가 통계 막대그래프 대신 클릭 가능한 공고 카드로 렌더링한다.
         "posting_list",
