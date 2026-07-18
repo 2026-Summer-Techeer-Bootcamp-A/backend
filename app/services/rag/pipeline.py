@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.services.rag.evaluator import evaluate
-from app.services.rag.llm import get_llm
+from app.services.rag.llm import LLMClient, get_llm
 from app.services.rag.router import plan as make_plan
 from app.services.rag.schemas import (
     ChatResponse,
@@ -47,6 +47,8 @@ def _dispatch(
     verbose: bool = False,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
+    resume_text: str | None = None,
+    llm: LLMClient | None = None,
 ) -> tuple[list[dict], bool]:
     """intent에 따라 도구를 실행하고 (tool_output 리스트, fell_back)을 반환.
 
@@ -86,6 +88,21 @@ def _dispatch(
     # 그대로 흘러가 실제 질문에 답하고, 첨부된 이력서는 그 턴에서는 그냥 무시된다.
     if posting_ids and len(posting_ids) >= 2:
         r = _run(compare_tool.posting_posting_compare, session, posting_ids[0], posting_ids[1])
+        if r:
+            out.append(r)
+        return out, False
+    elif resume_text and posting_ids and len(posting_ids) == 1:
+        # 이력서 확인 세션에 원문이 실려 있으면 태그 교집합 대신 LLM이 원문을 읽고
+        # 요구사항별로 판정하는 경로를 탄다(compare_tool.resume_posting_llm_compare).
+        # 원문이 없으면(세션 미첨부/만료) 아래 기존 태그 기반 분기를 그대로 쓴다.
+        r = _run(
+            compare_tool.resume_posting_llm_compare,
+            session,
+            resume_text,
+            owned_skill_ids,
+            posting_ids[0],
+            llm or get_llm(),
+        )
         if r:
             out.append(r)
         return out, False
@@ -176,6 +193,7 @@ def run_chat_events(
     collect: dict[str, Any] | None = None,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
+    resume_text: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """SSE 계약과 정확히 같은 모양의 이벤트를 순서대로 yield한다.
 
@@ -267,7 +285,13 @@ def run_chat_events(
             return
 
         tool_outputs, fell_back = _dispatch(
-            session, p, verbose=verbose, owned_skill_ids=owned_skill_ids, posting_ids=posting_ids
+            session,
+            p,
+            verbose=verbose,
+            owned_skill_ids=owned_skill_ids,
+            posting_ids=posting_ids,
+            resume_text=resume_text,
+            llm=llm,
         )
         collect["tool_outputs"] = tool_outputs
 
@@ -430,6 +454,7 @@ def run_chat(
     verbose: bool = False,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
+    resume_text: str | None = None,
 ) -> ChatResponse:
     collect: dict[str, Any] = {}
     for _event in run_chat_events(
@@ -440,6 +465,7 @@ def run_chat(
         collect=collect,
         owned_skill_ids=owned_skill_ids,
         posting_ids=posting_ids,
+        resume_text=resume_text,
     ):
         pass  # 이벤트는 스트리밍 전용 — 비스트리밍 조립은 collect로 한다
 
