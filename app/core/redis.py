@@ -71,6 +71,16 @@ def get_resume_confirm_session(session_id: str) -> dict[str, Any] | None:
         return None
 
 
+def get_resume_text_from_session(session_id: str) -> str | None:
+    # 이력서 원문은 Postgres에 절대 저장하지 않고 확인 세션 payload에만 실어 세션
+    # 범위(TTL)로만 다룬다. 여기서는 그 payload에서 원문 텍스트만 뽑아 돌려준다.
+    data = get_resume_confirm_session(session_id)
+    if not data:
+        return None
+    text = data.get("resume_text")
+    return text if isinstance(text, str) and text.strip() else None
+
+
 def resume_confirm_session_exists(session_id: str) -> bool:
     try:
         return redis_client.exists(f"{RESUME_CONFIRM_SESSION_KEY_PREFIX}{session_id}") > 0

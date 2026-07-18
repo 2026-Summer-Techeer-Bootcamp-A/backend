@@ -85,6 +85,7 @@ def parse_resume_text(
         position=extract_position(text),
         career_min=career_min,
         career_max=career_max,
+        resume_text=text,
     )
 
 

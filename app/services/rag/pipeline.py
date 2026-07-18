@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.services.rag.evaluator import evaluate
-from app.services.rag.llm import get_llm
+from app.services.rag.llm import LLMClient, get_llm
 from app.services.rag.router import plan as make_plan
 from app.services.rag.schemas import (
     ChatResponse,
@@ -47,6 +47,8 @@ def _dispatch(
     verbose: bool = False,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
+    resume_text: str | None = None,
+    llm: LLMClient | None = None,
 ) -> tuple[list[dict], bool]:
     """intent에 따라 도구를 실행하고 (tool_output 리스트, fell_back)을 반환.
 
@@ -86,6 +88,21 @@ def _dispatch(
     # 그대로 흘러가 실제 질문에 답하고, 첨부된 이력서는 그 턴에서는 그냥 무시된다.
     if posting_ids and len(posting_ids) >= 2:
         r = _run(compare_tool.posting_posting_compare, session, posting_ids[0], posting_ids[1])
+        if r:
+            out.append(r)
+        return out, False
+    elif resume_text and posting_ids and len(posting_ids) == 1:
+        # 이력서 확인 세션에 원문이 실려 있으면 태그 교집합 대신 LLM이 원문을 읽고
+        # 요구사항별로 판정하는 경로를 탄다(compare_tool.resume_posting_llm_compare).
+        # 원문이 없으면(세션 미첨부/만료) 아래 기존 태그 기반 분기를 그대로 쓴다.
+        r = _run(
+            compare_tool.resume_posting_llm_compare,
+            session,
+            resume_text,
+            owned_skill_ids,
+            posting_ids[0],
+            llm or get_llm(),
+        )
         if r:
             out.append(r)
         return out, False
@@ -176,6 +193,7 @@ def run_chat_events(
     collect: dict[str, Any] | None = None,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
+    resume_text: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     """SSE 계약과 정확히 같은 모양의 이벤트를 순서대로 yield한다.
 
@@ -238,9 +256,15 @@ def run_chat_events(
         # resume_market도 resume_gap/resume_coverage와 마찬가지로 이력서 없이는 성립할
         # 수 없는 질문이라 같은 취급을 한다(_dispatch의 세 번째 분기도 owned_skill_ids가
         # 없으면 애초에 안 타므로, 여기서 걸러주지 않으면 무관한 top_skills로 새어나간다).
+        # 단, 세션 범위 이력서 원문(resume_text)과 공고 한 개가 함께 온 경우는 예외다 —
+        # 이때는 owned_skill_ids(저장된 이력서의 스킬 태그)가 비어 있어도 _dispatch의
+        # resume_posting_llm_compare 분기(첨부가 텍스트 인텐트보다 우선한다는 설계,
+        # 위 _dispatch의 첫 주석 블록 참고)가 원문을 직접 읽고 판정하므로 도구 실행
+        # 전에 조기 종료하면 오히려 정상 요청을 막게 된다.
         if (
             p.intent in ("resume_gap", "resume_coverage", "resume_market", "resume_recommend")
             and not owned_skill_ids
+            and not (resume_text and posting_ids and len(posting_ids) == 1)
         ):
             answer = (
                 "이력서를 먼저 첨부해 주세요. 첨부하면 이력서 기준으로 부족한 기술과 "
@@ -267,7 +291,13 @@ def run_chat_events(
             return
 
         tool_outputs, fell_back = _dispatch(
-            session, p, verbose=verbose, owned_skill_ids=owned_skill_ids, posting_ids=posting_ids
+            session,
+            p,
+            verbose=verbose,
+            owned_skill_ids=owned_skill_ids,
+            posting_ids=posting_ids,
+            resume_text=resume_text,
+            llm=llm,
         )
         collect["tool_outputs"] = tool_outputs
 
@@ -305,8 +335,14 @@ def run_chat_events(
         # route를 실제 실행된 도구로 덮어쓰고, 계획과 실제가 어긋난 경우 기존
         # fell_back(→degraded) 신호에 합류시켜 "의도한 도구가 못 쓰였다"는 사실이
         # 신뢰도/degraded에도 반영되게 한다.
+        #
+        # 다만 posting_ids(첨부 공고)가 있는 경우는 예외다 — 이력서 텍스트 인텐트(예:
+        # resume_coverage)로 계획됐어도 _dispatch가 첨부 우선 설계(K2)에 따라 compare
+        # 도구로 정당하게 갈아탄다(위 elif resume_text and posting_ids 분기). 이건
+        # "대상을 못 찾아 대체된" 상황이 아니라 첨부가 의도한 그대로 응답한 것이므로,
+        # posting_ids가 있으면 route 불일치를 fell_back으로 치지 않는다.
         route = tool_outputs[0]["tool"] if tool_outputs else route
-        fell_back = fell_back or route != collect["route"]
+        fell_back = fell_back or (route != collect["route"] and not posting_ids)
         collect["route"] = route
 
         if fell_back:
@@ -430,6 +466,7 @@ def run_chat(
     verbose: bool = False,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
+    resume_text: str | None = None,
 ) -> ChatResponse:
     collect: dict[str, Any] = {}
     for _event in run_chat_events(
@@ -440,6 +477,7 @@ def run_chat(
         collect=collect,
         owned_skill_ids=owned_skill_ids,
         posting_ids=posting_ids,
+        resume_text=resume_text,
     ):
         pass  # 이벤트는 스트리밍 전용 — 비스트리밍 조립은 collect로 한다
 

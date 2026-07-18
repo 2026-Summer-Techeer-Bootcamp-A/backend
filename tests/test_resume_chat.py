@@ -214,6 +214,168 @@ def test_run_chat_events_answers_when_resume_attached(session: Session) -> None:
     assert "이력서를 먼저 첨부" not in final["answer"]
 
 
+def test_run_chat_events_resume_text_with_single_posting_bypasses_missing_resume_guard(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """세션 범위 이력서 원문(resume_text)과 공고 1개가 함께 오면, 저장된 이력서가 없어
+    owned_skill_ids가 비어 있어도 미첨부 가드가 조기 종료하면 안 된다 — _dispatch의
+    resume_posting_llm_compare 분기(첨부 우선 설계)가 원문을 직접 읽고 판정하기
+    때문이다. 회귀 대상: 이 조합에서 가드가 무조건 "이력서를 먼저 첨부해 주세요"로
+    조기 종료해 실제 비교 도구가 아예 실행되지 못했던 버그.
+
+    compare_tool.resume_posting_llm_compare는 실제 Gemini 호출이 필요해 이 단위
+    테스트에서는 _dispatch를 스텁으로 갈아끼우고, 가드를 통과해 _dispatch가 정확한
+    인자(resume_text/posting_ids/owned_skill_ids)로 호출되는지만 확인한다."""
+    posting_id = session.info["python_id"]  # 유효한 id이기만 하면 되므로 스킬 id를 재사용
+    calls: list[dict] = []
+
+    def fake_dispatch(sess: Session, plan: Plan, **kwargs: object) -> tuple[list[dict], bool]:
+        calls.append(kwargs)
+        return (
+            [
+                {
+                    "tool": "compare",
+                    "tool_result": {
+                        "kind": "resume_posting_llm",
+                        "label": "이력서 대비 공고 요구사항(LLM 판정)",
+                        "items": [],
+                        "compare": {
+                            "posting_title": "백엔드",
+                            "score": 50.0,
+                            "counts": {"met": 1, "partial": 0, "gap": 1},
+                            "summary": "요약",
+                            "requirements": [],
+                            "degraded": False,
+                        },
+                    },
+                    "citation": {
+                        "type": "compare",
+                        "ref": "이력서 vs 백엔드",
+                        "label": "이력서 원문 대비 공고 요구사항 LLM 판정",
+                    },
+                    "n": 2,
+                    "facts": "met 1건, gap 1건",
+                }
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(rag_pipeline, "_dispatch", fake_dispatch)
+
+    events = list(
+        rag_pipeline.run_chat_events(
+            session,
+            "내 이력서로 지원 가능한 공고 얼마나 돼?",  # 휴리스틱상 resume_coverage로 분류됨
+            pool="domestic",
+            owned_skill_ids=None,
+            posting_ids=[posting_id],
+            resume_text="지원 직무: 백엔드 개발자, 보유 기술: Python, FastAPI",
+        )
+    )
+
+    assert len(calls) == 1  # 가드에서 조기 종료됐다면 _dispatch는 호출조차 안 된다
+    assert calls[0]["resume_text"] == "지원 직무: 백엔드 개발자, 보유 기술: Python, FastAPI"
+    assert calls[0]["posting_ids"] == [posting_id]
+    assert not calls[0]["owned_skill_ids"]  # None(저장된 이력서 미첨부) 그대로 전달돼야 한다
+
+    kinds = [e["type"] for e in events]
+    assert "result" in kinds  # 조기 종료(plan, final만)가 아니라 도구 결과가 있어야 한다
+    final = events[-1]
+    assert final["type"] == "final"
+    assert "이력서를 먼저 첨부" not in final["answer"]
+
+
+def test_run_chat_events_attachment_driven_compare_route_change_is_not_fell_back(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """계획 라우트는 resume_coverage(도구=resume)인데, 공고를 첨부해 _dispatch가 compare
+    도구로 정당하게 갈아탈 때(K2 첨부 우선 설계) route 불일치를 대체(fell_back)로
+    오판하면 안 된다. 고치기 전에는 route != collect['route']("compare" != "resume")만
+    보고 fell_back=True로 오판해 degraded=True와 "질문이 겨냥한 대상을 찾지 못해 일반
+    기술 랭킹으로 대체됐어요" 사유가 붙었다 — 실제로는 첨부가 의도한 그대로 답한
+    경우인데도 대체된 것처럼 보이는 오탐이었다.
+
+    plan()/get_llm() 둘 다 스텁으로 갈아끼워, 이 테스트가 검증하려는 route/fell_back
+    결합 로직만 다른 잡음(휴리스틱 폴백, LLM 합성 미가용 등) 없이 확인한다."""
+    posting_id = session.info["python_id"]  # 유효한 id이기만 하면 되므로 스킬 id를 재사용
+
+    def fake_plan(sess: Session, llm: object, question: str, pool: str | None) -> tuple[Plan, bool]:
+        return (
+            Plan(
+                intent="resume_coverage",
+                tools=["resume"],
+                pool="domestic",
+                entities={},
+                subqueries=[question],
+            ),
+            False,  # plan_degraded=False — 계획 단계 자체는 성공했다고 가정
+        )
+
+    def fake_dispatch(sess: Session, plan: Plan, **kwargs: object) -> tuple[list[dict], bool]:
+        return (
+            [
+                {
+                    "tool": "compare",
+                    "tool_result": {
+                        "kind": "resume_posting_llm",
+                        "label": "이력서 대비 공고 요구사항(LLM 판정)",
+                        "items": [],
+                        "compare": {
+                            "posting_title": "백엔드",
+                            "score": 100.0,
+                            "counts": {"met": 2, "partial": 0, "gap": 0},
+                            "summary": "요약",
+                            "requirements": [],
+                            "degraded": False,
+                        },
+                    },
+                    "citation": {
+                        "type": "compare",
+                        "ref": "이력서 vs 백엔드",
+                        "label": "이력서 원문 대비 공고 요구사항 LLM 판정",
+                    },
+                    "n": 2,
+                    "facts": "met 2건, gap 0건",
+                }
+            ],
+            False,  # _dispatch 자체는 대상을 정확히 찾았으므로 fell_back=False
+        )
+
+    class _FakeSynthLLM:
+        """synthesize()가 실제 답을 만들도록(=synth_degraded=False) text()가 값을 낸다.
+        json()은 이 테스트에서 쓰이지 않지만(plan을 스텁으로 우회) 인터페이스상 필요하다."""
+
+        def __init__(self) -> None:
+            self.last_debug: dict | None = None
+            self.call_count = 0
+
+        def json(self, *a: object, **k: object) -> dict | None:
+            return None
+
+        def text(self, *a: object, **k: object) -> str:
+            return "이 공고는 이력서 기준 met 2건으로 잘 맞아요."
+
+    monkeypatch.setattr(rag_pipeline, "make_plan", fake_plan)
+    monkeypatch.setattr(rag_pipeline, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(rag_pipeline, "get_llm", lambda: _FakeSynthLLM())
+
+    events = list(
+        rag_pipeline.run_chat_events(
+            session,
+            "내 이력서로 지원 가능한 공고 얼마나 돼?",  # 휴리스틱상 resume_coverage로 분류됨
+            pool="domestic",
+            owned_skill_ids=None,
+            posting_ids=[posting_id],
+            resume_text="지원 직무: 백엔드 개발자, 보유 기술: Python, FastAPI",
+        )
+    )
+
+    final = events[-1]
+    assert final["type"] == "final"
+    assert final["degraded"] is False
+    assert "일반 기술 랭킹으로 대체" not in " ".join(final["degraded_reasons"])
+
+
 def test_run_chat_events_non_resume_question_ignores_owned_skill_ids(session: Session) -> None:
     """일반 질문 경로는 owned_skill_ids를 완전히 무시해야 한다(byte-for-byte 동일 동작)."""
     without = list(rag_pipeline.run_chat_events(session, "요즘 뭐가 제일 인기야?", pool="domestic"))
