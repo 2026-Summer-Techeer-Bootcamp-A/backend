@@ -182,6 +182,11 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
     }
 
 
+_OPEN_NULL_CLOSE_DATE_WINDOW_DAYS = 180
+# 마감일이 없는 공고("상시채용"으로 추정)는 최근 게시된 것만 열려있다고 본다.
+# 게시일도 없거나 오래됐으면 마감일 파싱 실패로 죽은 공고일 가능성이 높다.
+
+
 def _apply_posting_filters(
     stmt,
     *,
@@ -201,8 +206,18 @@ def _apply_posting_filters(
     """공고 목록 조회와 카운트가 공유하는 WHERE 절. 두 쿼리가 어긋나면 total과
     실제 반환 건수가 달라지므로 반드시 한 곳에서만 정의한다."""
     stmt = stmt.where(Posting.is_deleted.is_(False))
-    # 마감일이 지난 공고는 기본적으로 목록에서 제외한다(마감일 자체가 없는 상시채용은 유지).
-    stmt = stmt.where(Posting.close_date.is_(None) | (Posting.close_date >= date.today()))
+    # 마감일이 지난 공고는 기본적으로 목록에서 제외한다. 마감일 자체가 없는 공고는
+    # "상시채용"으로 추정하되, 게시일이 최근 _OPEN_NULL_CLOSE_DATE_WINDOW_DAYS일
+    # 이내인 것만 열려있다고 본다. 게시일도 없거나 오래된 공고는 마감일 파싱 실패로
+    # 죽은 공고일 가능성이 높아 무기한 유지하면 실제로는 닫힌 공고가 목록에 쌓인다.
+    stmt = stmt.where(
+        (Posting.close_date >= date.today())
+        | (
+            Posting.close_date.is_(None)
+            & Posting.post_date.isnot(None)
+            & (Posting.post_date >= date.today() - timedelta(days=_OPEN_NULL_CLOSE_DATE_WINDOW_DAYS))
+        )
+    )
 
     if pool is not None:
         stmt = stmt.where(Posting.pool == pool)
