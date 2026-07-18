@@ -87,7 +87,17 @@ def _dispatch(
     # 일반 시장 인텐트(skill_ranking/skill_demand/...)는 아래 텍스트 인텐트 분기로
     # 그대로 흘러가 실제 질문에 답하고, 첨부된 이력서는 그 턴에서는 그냥 무시된다.
     if posting_ids and len(posting_ids) >= 2:
-        r = _run(compare_tool.posting_posting_compare, session, posting_ids[0], posting_ids[1])
+        # 공고를 2개 이상 첨부하면 태그 교집합 대신 첫 번째 공고 원문에서 뽑은
+        # 요구사항을 두 번째 공고 원문과 LLM으로 대조하는 경로를 탄다
+        # (compare_tool.posting_posting_llm_compare). 원문 부재/추출 실패/판정
+        # 실패면 그 함수 내부에서 기존 태그 교집합 비교로 강등한다(degraded=True).
+        r = _run(
+            compare_tool.posting_posting_llm_compare,
+            session,
+            posting_ids[0],
+            posting_ids[1],
+            llm or get_llm(),
+        )
         if r:
             out.append(r)
         return out, False
