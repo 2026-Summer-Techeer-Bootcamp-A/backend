@@ -28,13 +28,13 @@ def test_guard_downgrades_hallucinated_quote():
                 {
                     "req_id": "R1",
                     "verdict": "met",
-                    "resume_quote": "FastAPI 정산 API 40개 엔드포인트 운영",
+                    "quote": "FastAPI 정산 API 40개 엔드포인트 운영",
                     "rationale": "일치",
                 },
                 {
                     "req_id": "R2",
                     "verdict": "met",
-                    "resume_quote": "EKS 클러스터 3년 운영",
+                    "quote": "EKS 클러스터 3년 운영",
                     "rationale": "지어냄",
                 },
             ]
@@ -46,7 +46,7 @@ def test_guard_downgrades_hallucinated_quote():
     r2 = next(j for j in out if j["req_id"] == "R2")
     assert r1["verdict"] == "met"
     assert r2["verdict"] == "gap"  # 원문에 없는 인용이라 강등
-    assert r2["resume_quote"] == ""
+    assert r2["quote"] == ""
 
 
 def test_judge_llm_ok_false_when_llm_returns_nothing_usable():
@@ -67,9 +67,9 @@ def test_judge_requirements_empty_returns_false():
 
 def test_weighted_score_math():
     js = [
-        {"req_id": "a", "verdict": "met", "resume_quote": "", "rationale": "", "next_step": ""},
-        {"req_id": "b", "verdict": "partial", "resume_quote": "", "rationale": "", "next_step": ""},
-        {"req_id": "c", "verdict": "gap", "resume_quote": "", "rationale": "", "next_step": ""},
+        {"req_id": "a", "verdict": "met", "quote": "", "rationale": "", "next_step": ""},
+        {"req_id": "b", "verdict": "partial", "quote": "", "rationale": "", "next_step": ""},
+        {"req_id": "c", "verdict": "gap", "quote": "", "rationale": "", "next_step": ""},
     ]
     assert weighted_score(js) == 50.0  # (1 + 0.5 + 0) / 3 * 100
     assert weighted_score([]) == 0.0
