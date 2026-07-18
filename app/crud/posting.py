@@ -66,6 +66,7 @@ def list_posting_cards(
     deadline_within_days: int | None = None,
     min_match: float | None = None,
     q: str | None = None,
+    company: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
     rich_only: bool = False,
@@ -88,6 +89,7 @@ def list_posting_cards(
         district=district,
         deadline_within_days=deadline_within_days,
         q=q,
+        company=company,
         skills=skills,
         industry=industry,
         rich_only=rich_only,
@@ -104,6 +106,7 @@ def list_posting_cards(
         district=district,
         deadline_within_days=deadline_within_days,
         q=q,
+        company=company,
         skills=skills,
         industry=industry,
         rich_only=rich_only,
@@ -195,6 +198,7 @@ def _apply_posting_filters(
     district: str | None,
     deadline_within_days: int | None,
     q: str | None = None,
+    company: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
     rich_only: bool = False,
@@ -225,6 +229,12 @@ def _apply_posting_filters(
     if q:
         pattern = f"%{q.strip()}%"
         stmt = stmt.where(or_(Posting.title.ilike(pattern), Posting.company.ilike(pattern)))
+
+    if company:
+        # q(제목 OR 회사 부분일치)와 달리 회사명 필드만 본다. q로 "삼성전자"를 검색하면
+        # 제목에 "삼성전자"를 언급한 하청/시설관리 업체 공고까지 걸려, 그 회사 소속이
+        # 아닌 공고가 섞인다. 특정 기업의 공고만 좁히려면 이 필터를 써야 한다.
+        stmt = stmt.where(Posting.company.ilike(f"%{company.strip()}%"))
 
     if position is not None:
         stmt = stmt.where(
@@ -336,6 +346,7 @@ def _count_filtered_postings(
     district: str | None = None,
     deadline_within_days: int | None = None,
     q: str | None = None,
+    company: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
     rich_only: bool = False,
@@ -364,6 +375,7 @@ def _count_filtered_postings(
                 "district": district,
                 "deadline_within_days": deadline_within_days,
                 "q": q,
+                "company": company,
                 # 순서만 다른 동일 skills 조합이 다른 키로 갈리지 않도록 정렬해서 직렬화한다.
                 "skills": sorted(skills) if skills else skills,
                 "industry": industry,
@@ -386,6 +398,7 @@ def _count_filtered_postings(
         district=district,
         deadline_within_days=deadline_within_days,
         q=q,
+        company=company,
         skills=skills,
         industry=industry,
         rich_only=rich_only,
@@ -413,6 +426,7 @@ def _get_filtered_postings(
     limit: int | None = None,
     offset: int | None = None,
     q: str | None = None,
+    company: str | None = None,
     skills: list[str] | None = None,
     industry: str | None = None,
     rich_only: bool = False,
@@ -428,6 +442,7 @@ def _get_filtered_postings(
         district=district,
         deadline_within_days=deadline_within_days,
         q=q,
+        company=company,
         skills=skills,
         industry=industry,
         rich_only=rich_only,
