@@ -44,6 +44,7 @@ def generate_resume_feedback(
     session: Session,
     pool: str | None,
     memo: str | None = None,
+    certs: list[dict[str, Any]] | None = None,
 ) -> ResumeFeedbackResponse:
     try:
         market_skills = _get_market_demand_skills(session=session, position=position, pool=pool)
@@ -52,6 +53,7 @@ def generate_resume_feedback(
             position=position,
             market_skills=market_skills,
             memo=memo,
+            certs=certs,
         )
         return ResumeFeedbackResponse(
             feedback=feedback,
@@ -92,6 +94,7 @@ def _generate_with_gemini(
     position: str,
     market_skills: list[str],
     memo: str | None = None,
+    certs: list[dict[str, Any]] | None = None,
 ) -> tuple[list[str], list[str]]:
     if not settings.gemini_api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
@@ -108,6 +111,7 @@ def _generate_with_gemini(
                             position=position,
                             market_skills=market_skills,
                             memo=memo,
+                            certs=certs,
                         )
                     }
                 ],
@@ -139,6 +143,8 @@ def _generate_with_gemini(
 
     text = _extract_text(response_body)
     parsed = _parse_json_object(text)
+    if parsed is None:
+        raise ValueError("Gemini response is not valid JSON")
     feedback = _clean_string_list(parsed.get("feedback"))
     questions = _clean_string_list(parsed.get("questions"))
     if not feedback or not questions:
@@ -152,9 +158,15 @@ def _build_prompt(
     position: str,
     market_skills: list[str],
     memo: str | None = None,
+    certs: list[dict[str, Any]] | None = None,
 ) -> str:
     skill_names = [str(skill.get("canonical", "")).strip() for skill in skills]
     skill_names = [skill for skill in skill_names if skill]
+    cert_names = [
+        str(cert.get("name", "")).strip() if isinstance(cert, dict) else str(cert).strip()
+        for cert in (certs or [])
+    ]
+    cert_names = [cert for cert in cert_names if cert]
     payload: dict[str, Any] = {
         "task": "확정된 이력서 스킬셋을 기준으로, 엄격한 면접관 관점의 개선 피드백과 예상 면접 질문을 생성하세요.",
         "position": position,
@@ -170,6 +182,8 @@ def _build_prompt(
         ],
         "schema": {"feedback": ["string"], "questions": ["string"]},
     }
+    if cert_names:
+        payload["보유 자격증"] = cert_names
     if memo:
         payload["지원자 메모"] = memo
         payload["requirements"].append(
@@ -199,25 +213,97 @@ def _extract_text(response_body: dict[str, Any]) -> str:
     return "\n".join(texts)
 
 
-def _parse_json_object(text: str) -> dict[str, Any]:
+def _try_parse_json_object(candidate: str, *, strict: bool = True) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(candidate, strict=strict)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_json_object(text: str) -> dict[str, Any] | None:
+    """Gemini 응답 텍스트를 JSON 객체로 파싱한다.
+
+    Gemini가 JSON 스키마를 어기는 방식은 크게 두 가지다. 한국어 문장 속에
+    "React"처럼 용어를 그대로 인용해 문자열 값 안에 이스케이프하지 않은
+    안쪽 따옴표가 섞이거나, 문자열 값 안에 리터럴 개행 같은 제어문자가
+    그대로 남는 경우다. 둘 다 프로덕션에서 "Expecting ',' delimiter" 류의
+    JSONDecodeError로 관측됐고, 이 오류 하나 때문에 멀쩡한 LLM 답변을 통째로
+    버리고 규칙 기반 폴백으로 조용히 강등하는 게 실제 버그였다.
+
+    아래 순서로 단계적으로 복구를 시도한다.
+    1) 통째로 json.loads로 파싱(기존 동작, 정상 응답은 항상 여기서 끝난다).
+    2) strict=False로 다시 파싱(문자열 안 리터럴 제어문자를 허용).
+    3) 중괄호 구간만 잘라내 strict=False로 파싱.
+    4) 그래도 실패하면, 문자열 값 중간에 낀 것으로 보이는 안쪽 따옴표를
+       이스케이프하는 복구 휴리스틱을 적용하고 마지막으로 한 번 더 파싱.
+    이 마지막 복구까지 실패하면 예외를 올리지 않고 None을 돌려준다 — 없는
+    데이터를 지어내지 않고 정직하게 실패를 알려서, 호출부가 규칙 기반
+    폴백으로 강등할 수 있게 한다.
+    """
     stripped = text.strip()
     if stripped.startswith("```"):
         stripped = stripped.strip("`")
         if stripped.lower().startswith("json"):
             stripped = stripped[4:].strip()
 
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start < 0 or end < start:
-            raise
-        parsed = json.loads(stripped[start : end + 1])
+    parsed = _try_parse_json_object(stripped)
+    if parsed is not None:
+        return parsed
 
-    if not isinstance(parsed, dict):
-        raise ValueError("Gemini response is not a JSON object")
-    return parsed
+    parsed = _try_parse_json_object(stripped, strict=False)
+    if parsed is not None:
+        return parsed
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end < start:
+        return None
+    braced = stripped[start : end + 1]
+
+    parsed = _try_parse_json_object(braced, strict=False)
+    if parsed is not None:
+        return parsed
+
+    repaired = _repair_inner_quotes(braced)
+    return _try_parse_json_object(repaired, strict=False)
+
+
+_STRUCTURAL_BEFORE = frozenset(":,[{")
+_STRUCTURAL_AFTER = frozenset(":,]}")
+
+
+def _repair_inner_quotes(text: str) -> str:
+    """문자열 값 중간에 낀 것으로 보이는, 이스케이프되지 않은 큰따옴표를 복구한다.
+
+    JSON 문자열의 여는/닫는 따옴표는 앞뒤 중 한쪽이 `:` `,` `[` `{` `]` `}` 같은
+    구조 문자와 맞닿아 있다(공백은 건너뛰고 본다). 반대로 "React"처럼 문장
+    중간에 낀 따옴표는 앞뒤 모두 일반 문자와 맞닿아 있다. 이 차이를 이용해
+    "양쪽 다 구조 문자가 아닌" 따옴표만 골라 이스케이프한다.
+
+    변수 길이 공백을 사이에 둔 앞/뒤 문맥을 봐야 해서 표준 re 모듈의 고정폭
+    lookbehind로는 표현할 수 없다. 그래서 정규식 대신 위치를 직접 훑으며
+    양옆의 첫 비공백 문자를 찾는 방식으로 구현한다. 마지막 수단으로만
+    호출되는 만큼, 애매하면(양쪽 중 하나라도 구조 문자면) 건드리지 않는
+    보수적인 판단을 우선한다.
+    """
+
+    def _has_structural_neighbor(neighbors: frozenset[str], index: int, step: int) -> bool:
+        i = index
+        while 0 <= i < len(text) and text[i].isspace():
+            i += step
+        return 0 <= i < len(text) and text[i] in neighbors
+
+    result: list[str] = []
+    for i, char in enumerate(text):
+        if char == '"' and (i == 0 or text[i - 1] != "\\"):
+            preceded_by_structural = _has_structural_neighbor(_STRUCTURAL_BEFORE, i - 1, -1)
+            followed_by_structural = _has_structural_neighbor(_STRUCTURAL_AFTER, i + 1, 1)
+            if not preceded_by_structural and not followed_by_structural:
+                result.append('\\"')
+                continue
+        result.append(char)
+    return "".join(result)
 
 
 def _clean_string_list(value: Any) -> list[str]:
