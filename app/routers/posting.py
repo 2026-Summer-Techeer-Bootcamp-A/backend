@@ -97,6 +97,9 @@ def get_postings(
         float | None, Query(ge=0, le=100, description="최소 매칭률(%). resume_id 필요")
     ] = None,
     q: Annotated[str | None, Query(min_length=1, max_length=200, description="제목 또는 회사 검색어")] = None,
+    company: Annotated[
+        str | None, Query(min_length=1, max_length=200, description="회사명 부분일치(제목은 보지 않음)")
+    ] = None,
     skills: Annotated[str | None, Query(description="쉼표로 구분한 기술명(하나 이상 일치)")] = None,
     industry: Annotated[str | None, Query(description="업종 부분일치(Posting.industry)")] = None,
     rich_only: Annotated[bool, Query(description="설명이 충분히 상세한 공고만 조회")] = False,
@@ -140,6 +143,7 @@ def get_postings(
         deadline_within_days=deadline_within_days,
         min_match=min_match,
         q=q,
+        company=company,
         skills=[skill.strip() for skill in skills.split(",") if skill.strip()] if skills else None,
         industry=industry,
         rich_only=rich_only,
