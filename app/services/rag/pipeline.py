@@ -335,8 +335,14 @@ def run_chat_events(
         # route를 실제 실행된 도구로 덮어쓰고, 계획과 실제가 어긋난 경우 기존
         # fell_back(→degraded) 신호에 합류시켜 "의도한 도구가 못 쓰였다"는 사실이
         # 신뢰도/degraded에도 반영되게 한다.
+        #
+        # 다만 posting_ids(첨부 공고)가 있는 경우는 예외다 — 이력서 텍스트 인텐트(예:
+        # resume_coverage)로 계획됐어도 _dispatch가 첨부 우선 설계(K2)에 따라 compare
+        # 도구로 정당하게 갈아탄다(위 elif resume_text and posting_ids 분기). 이건
+        # "대상을 못 찾아 대체된" 상황이 아니라 첨부가 의도한 그대로 응답한 것이므로,
+        # posting_ids가 있으면 route 불일치를 fell_back으로 치지 않는다.
         route = tool_outputs[0]["tool"] if tool_outputs else route
-        fell_back = fell_back or route != collect["route"]
+        fell_back = fell_back or (route != collect["route"] and not posting_ids)
         collect["route"] = route
 
         if fell_back:

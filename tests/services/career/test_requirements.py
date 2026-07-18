@@ -27,7 +27,8 @@ def test_extract_parses_llm_requirements():
             ]
         }
     )
-    reqs = extract_requirements(desc, seed_tags=["FastAPI"], llm=llm)
+    reqs, ok = extract_requirements(desc, seed_tags=["FastAPI"], llm=llm)
+    assert ok is True
     assert reqs == [
         {
             "id": "R1",
@@ -39,7 +40,17 @@ def test_extract_parses_llm_requirements():
 
 def test_extract_falls_back_to_tags_when_llm_none():
     llm = _FakeLLM(None)
-    reqs = extract_requirements("[]", seed_tags=["FastAPI", "PostgreSQL"], llm=llm)
+    reqs, ok = extract_requirements("[]", seed_tags=["FastAPI", "PostgreSQL"], llm=llm)
+    assert ok is False  # 태그 폴백은 결과가 비어있지 않아도 LLM 출처가 아니다
     assert [r["text"] for r in reqs] == ["FastAPI", "PostgreSQL"]
     assert reqs[0]["id"] == "R1"
     assert reqs[0]["source_quote"] == ""
+
+
+def test_extract_falls_back_to_tags_when_description_empty():
+    """description이 비어있으면(원문 자체가 없음) LLM을 호출조차 하지 않고 태그
+    폴백으로 빠지므로 llm_ok는 False다."""
+    llm = _FakeLLM({"items": [{"id": "R1", "text": "안 쓰일 응답"}]})
+    reqs, ok = extract_requirements(None, seed_tags=["Docker"], llm=llm)
+    assert ok is False
+    assert [r["text"] for r in reqs] == ["Docker"]

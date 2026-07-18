@@ -1,11 +1,13 @@
 """커리어 적합도 Split Diff — /chat이 resume_session_id를 받아 LLM 비교로 라우팅하는지,
 세션이 없으면 기존 태그 기반 비교로 강등하는지 확인한다.
 
-GEMINI_API_KEY가 없는 테스트 환경에서는 app.services.rag.llm.get_llm()이 NullClient를
-반환한다. 그래도 requirements 추출은 seed_tags(공고 요구 기술)로 태그 폴백해 비어있지
-않은 요구 목록을 만들고, 판정은 LLM이 죽어 전부 gap으로 채워지긴 하지만 여전히
-tool_result.kind는 resume_posting_llm으로 나온다 — 이 테스트가 확인하려는 것은 판정
-품질이 아니라 라우팅(세션 유무에 따라 어떤 kind로 가는지)이라 이걸로 충분하다.
+GEMINI_API_KEY가 없는 테스트 환경에서는 app.services.rag.llm.get_llm()이 기본적으로
+NullClient를 반환해 모든 LLM 호출이 None이 된다. extract_requirements/judge_requirements가
+LLM 실패를 정직하게 강등 신호(llm_ok=False)로 돌려주게 고친 뒤로는(compare_tool.py 참고)
+NullClient로는 resume_posting_llm_compare가 태그 기반 비교로 강등돼 kind가
+resume_posting_llm로 나오지 않는다 — 그래서 "LLM 비교로 라우팅"을 검증하는 테스트는
+app.services.rag.pipeline.get_llm을 실제로 요구/판정을 만들어내는 가짜 LLM으로 갈아끼워
+LLM 경로가 정직하게 성공하는 경우를 재현한다.
 """
 
 from collections.abc import Iterator
@@ -37,6 +39,7 @@ def session() -> Iterator[Session]:
         posting = Posting(
             source="t", source_uid="1", pool="domestic", title="백엔드", company="회사A",
             post_date=date(2026, 1, 1),
+            description='[{"title":"자격요건","text":"Python 백엔드 개발 경험"}]',
         )
         s.add(posting)
         s.flush()
@@ -92,6 +95,42 @@ def client(session: Session) -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
+class _FakeLLM:
+    """extract_requirements/judge_requirements 둘 다 실제로 판정을 만들어내는 가짜
+    LLM — 프롬프트 내용으로 어느 단계 호출인지 구분한다(공고 본문/요구사항 키워드는
+    각 함수의 프롬프트 템플릿에서 고정으로 쓰인다). 플래너 프롬프트처럼 둘 다에
+    해당하지 않는 호출은 None을 돌려줘 라우터가 휴리스틱으로 대체되게 둔다 — 이
+    테스트가 검증하려는 것은 라우팅 자체가 아니라 LLM 비교 경로의 정직한 성공이다."""
+
+    def __init__(self) -> None:
+        self.last_debug: dict | None = None
+        self.call_count = 0
+
+    def json(self, system: str, prompt: str, temperature: float = 0.2, *, max_output_tokens: int | None = None) -> dict | None:
+        self.call_count += 1
+        if "공고 본문" in prompt:
+            return {
+                "items": [
+                    {"id": "R1", "text": "Python 백엔드 개발 경험", "source_quote": "Python 백엔드 개발 경험"},
+                ]
+            }
+        if "요구사항:" in prompt:
+            return {
+                "items": [
+                    {
+                        "req_id": "R1",
+                        "verdict": "met",
+                        "resume_quote": "Python 백엔드 개발자",
+                        "rationale": "일치",
+                    },
+                ]
+            }
+        return None
+
+    def text(self, system: str, prompt: str, temperature: float = 0.4) -> str | None:
+        return None
+
+
 def test_chat_with_resume_session_id_routes_to_llm_compare(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -99,6 +138,7 @@ def test_chat_with_resume_session_id_routes_to_llm_compare(
         "app.routers.chat.get_resume_text_from_session",
         lambda session_id: "Python 백엔드 개발자, 4년차." if session_id == "sess-1" else None,
     )
+    monkeypatch.setattr("app.services.rag.pipeline.get_llm", lambda: _FakeLLM())
 
     resp = client.post(
         "/api/v1/chat",
@@ -115,6 +155,7 @@ def test_chat_with_resume_session_id_routes_to_llm_compare(
     body = resp.json()
     assert body["tool_results"][0]["kind"] == "resume_posting_llm"
     assert body["tool_results"][0]["compare"]["posting_title"] == "백엔드"
+    assert body["tool_results"][0]["compare"]["degraded"] is False
 
 
 def test_chat_without_resume_session_id_degrades_to_tag_compare(client: TestClient) -> None:
