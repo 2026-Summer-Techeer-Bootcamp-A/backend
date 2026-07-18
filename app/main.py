@@ -1,4 +1,5 @@
 import anyio.to_thread
+import asyncio
 import logging
 from fastapi import FastAPI, Response
 from fastapi.responses import ORJSONResponse
@@ -32,6 +33,7 @@ from app.routers.search import router as search_router
 from app.routers.chat import router as chat_router
 from app.routers.news import router as news_router
 from app.routers.feed import router as feed_router
+from app.services.rag.embedder import warmup as embedder_warmup
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
@@ -479,6 +481,17 @@ async def lifespan(app: FastAPI):
     lock_conn.close()
 
     await anyio.to_thread.run_sync(_warm_dashboard_caches)
+
+    # BGE-M3 임베딩 모델은 첫 벡터 질의 때 지연 로딩되는데 CPU 로딩에 수십 초가 걸려
+    # 첫 사용자 질의가 그 지연을 통째로 떠안는다(실측 약 40초). 시작 직후 백그라운드로
+    # 미리 로드해 이 지연을 없앤다. 로딩을 기다리면 헬스체크와 시작이 그만큼 늦어지므로
+    # 태스크로 띄우고 기다리지 않는다. enable_vector_search가 꺼진 인스턴스에서는
+    # warmup이 즉시 no-op으로 빠진다. 워커마다 이 lifespan이 실행되므로 워커 수만큼
+    # 모델이 각자 로드된다는 점은 기존 지연 로딩과 동일하다.
+    if settings.enable_vector_search:
+        app.state.embedder_warmup_task = asyncio.create_task(
+            anyio.to_thread.run_sync(embedder_warmup)
+        )
 
     yield
 
