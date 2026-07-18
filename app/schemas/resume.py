@@ -22,6 +22,9 @@ class ResumeParseResponse(BaseModel):
     position: str | None = None
     career_min: int | None = None
     career_max: int | None = None
+    # 이력서 원문. 커리어 적합도 LLM 판정이 확인 세션 payload에 실어 쓰기 위한
+    # 값으로, Postgres에는 저장하지 않는다(Global Constraints 참고).
+    resume_text: str | None = None
 
 
 class ResumeConfirmRequest(BaseModel):
@@ -31,6 +34,9 @@ class ResumeConfirmRequest(BaseModel):
     career_max: int | None = Field(default=None, ge=0)
     pool: Literal["global", "domestic"]
     memo: str | None = Field(default=None, max_length=4000)
+    # /resume/parse 응답의 resume_text를 그대로 되돌려주는 값. 확인 세션 payload에
+    # 그대로 실려 Redis에만 TTL 범위로 저장되고 DB에는 저장되지 않는다.
+    resume_text: str | None = Field(default=None, max_length=20000)
 
     @model_validator(mode="after")
     def validate_career_range(self) -> "ResumeConfirmRequest":
