@@ -642,6 +642,14 @@ def get_skill_id_by_canonical(session: Session, canonical: str) -> tuple[int, st
     return skill.id, skill.canonical
 
 
+class _CountCache(BaseModel):
+    """count_matched_postings 결과(int)를 Redis에 담기 위한 얇은 래퍼. what-if(P3)에서
+    matched_before(이력서당 동일)와 matched_after가 이 캐시를 공유해, 같은 이력서로
+    칩을 여러 개 눌러도 matched_before는 한 번만 계산되고 재클릭은 완전히 캐시된다."""
+
+    count: int
+
+
 def count_matched_postings(
     session: Session,
     *,
@@ -653,11 +661,24 @@ def count_matched_postings(
     if not skill_ids:
         return 0
 
+    cache_key = make_reference_cache_key(
+        "match_count_matched_postings",
+        {
+            "pool": pool,
+            "position": position,
+            "only_open": only_open,
+            "skill_ids": sorted(skill_ids),
+        },
+    )
+    cached = get_cached(cache_key, _CountCache)
+    if cached is not None:
+        return cached.count
+
     posting_pool_query = build_posting_pool_query(
         pool=pool, position=position, only_open=only_open
     ).subquery()
 
-    return session.scalar(
+    count = session.scalar(
         select(func.count(distinct(PostingTech.posting_id)))
         .join(posting_pool_query, posting_pool_query.c.id == PostingTech.posting_id)
         .where(
@@ -665,6 +686,9 @@ def count_matched_postings(
             PostingTech.is_deleted.is_(False),
         )
     ) or 0
+
+    set_cached(cache_key, _CountCache(count=count), settings.stats_cache_ttl_seconds)
+    return count
 
 
 def calculate_what_if_response(
@@ -722,6 +746,22 @@ def calculate_coverage_distribution_response(
     only_open: bool = False,
 ) -> MatchCoverageDistributionResponse:
     """공고별(요구기술 min_required_skills개 이상) 커버리지 분포 히스토그램. widgets 'c-coverage-dist' 정식화."""
+    cache_key = make_reference_cache_key(
+        "match_coverage_distribution",
+        {
+            "pool": pool,
+            "position": position,
+            "threshold": threshold,
+            "min_required_skills": min_required_skills,
+            "bin_size": bin_size,
+            "only_open": only_open,
+            "owned": sorted(owned_skill_ids),
+        },
+    )
+    cached = get_cached(cache_key, MatchCoverageDistributionResponse)
+    if cached is not None:
+        return cached
+
     posting_pool_query = build_posting_pool_query(
         pool=pool, position=position, only_open=only_open
     ).subquery()
@@ -762,7 +802,7 @@ def calculate_coverage_distribution_response(
 
     my_percentile = round(sum(1 for c in coverages if c <= coverage_score) / total * 100, 1) if total else 0.0
 
-    return MatchCoverageDistributionResponse(
+    response = MatchCoverageDistributionResponse(
         pool=pool,
         coverage_score=coverage_score,
         histogram=[{"range_start": i * bin_size, "count": count} for i, count in enumerate(bins)],
@@ -775,6 +815,8 @@ def calculate_coverage_distribution_response(
         sample_warning=True if total < 50 else None,
         note=f"요구기술 {min_required_skills}개 이상 공고만 집계 · 히스토그램 bin={bin_size}%",
     )
+    set_cached(cache_key, response, settings.stats_cache_ttl_seconds)
+    return response
 
 
 def build_pool_skill_index(session: Session, posting_pool_subquery) -> dict[int, set[int]]:
@@ -1012,10 +1054,22 @@ def calculate_scoped_roadmap_response(
 
 
 def get_industry_skill_frequencies(session: Session, pool: Pool, industry: str) -> tuple[list[dict], int]:
+    """pivot-map(P1)이 산업별 상위 요구기술을 그릴 때 쓰는 참조 데이터. get_market_skill_frequencies와
+    반환 형태가 같아(skills, sample_size) 같은 _MarketSkillFrequenciesCache 래퍼를 재사용한다.
+    이력서와 무관한 시장 통계라 owned는 캐시 키에 넣지 않는다."""
+    cache_key = make_reference_cache_key(
+        "match_industry_skill_frequencies",
+        {"pool": pool, "industry": industry},
+    )
+    cached = get_cached(cache_key, _MarketSkillFrequenciesCache)
+    if cached is not None:
+        return cached.skills, cached.sample_size
+
     base_filters = [Posting.pool == pool, Posting.industry == industry, Posting.is_deleted.is_(False)]
 
     sample_size = session.scalar(select(func.count()).select_from(Posting).where(*base_filters)) or 0
     if sample_size == 0:
+        set_cached(cache_key, _MarketSkillFrequenciesCache(skills=[], sample_size=0), settings.stats_cache_ttl_seconds)
         return [], 0
 
     rows = session.execute(
@@ -1033,13 +1087,37 @@ def get_industry_skill_frequencies(session: Session, pool: Pool, industry: str) 
         .order_by(func.count(distinct(PostingTech.posting_id)).desc())
     ).all()
 
-    return [
+    result_skills = [
         {"skill_id": r.skill_id, "canonical": r.canonical, "category": r.category, "freq": float(r.freq)}
         for r in rows
-    ], sample_size
+    ]
+
+    set_cached(
+        cache_key,
+        _MarketSkillFrequenciesCache(skills=result_skills, sample_size=sample_size),
+        settings.stats_cache_ttl_seconds,
+    )
+    return result_skills, sample_size
+
+
+class _TargetsCache(BaseModel):
+    """get_category_targets/get_industry_targets 결과(list[tuple[str, int]])를 Redis에
+    담기 위한 얇은 래퍼. JSON 직렬화를 거치면 tuple이 list가 되므로, 필드 타입을
+    list[tuple[str, int]]로 선언해 pydantic이 역직렬화 시 다시 tuple로 복원하게 한다 —
+    호출부가 for name, n in ... 언패킹을 그대로 쓸 수 있어야 하기 때문이다."""
+
+    targets: list[tuple[str, int]]
 
 
 def get_category_targets(session: Session, pool: Pool, limit: int) -> list[tuple[str, int]]:
+    cache_key = make_reference_cache_key(
+        "match_category_targets",
+        {"pool": pool, "limit": limit},
+    )
+    cached = get_cached(cache_key, _TargetsCache)
+    if cached is not None:
+        return cached.targets
+
     rows = session.execute(
         select(PostingCategory.category, func.count(distinct(Posting.id)).label("n"))
         .select_from(Posting)
@@ -1056,10 +1134,20 @@ def get_category_targets(session: Session, pool: Pool, limit: int) -> list[tuple
         .order_by(func.count(distinct(Posting.id)).desc())
         .limit(limit)
     ).all()
-    return [(row.category, row.n) for row in rows]
+    targets = [(row.category, row.n) for row in rows]
+    set_cached(cache_key, _TargetsCache(targets=targets), settings.stats_cache_ttl_seconds)
+    return targets
 
 
 def get_industry_targets(session: Session, pool: Pool, limit: int) -> list[tuple[str, int]]:
+    cache_key = make_reference_cache_key(
+        "match_industry_targets",
+        {"pool": pool, "limit": limit},
+    )
+    cached = get_cached(cache_key, _TargetsCache)
+    if cached is not None:
+        return cached.targets
+
     rows = session.execute(
         select(Posting.industry, func.count().label("n"))
         .where(Posting.pool == pool, Posting.industry.isnot(None), Posting.is_deleted.is_(False))
@@ -1067,7 +1155,9 @@ def get_industry_targets(session: Session, pool: Pool, limit: int) -> list[tuple
         .order_by(func.count().desc())
         .limit(limit)
     ).all()
-    return [(row.industry, row.n) for row in rows]
+    targets = [(row.industry, row.n) for row in rows]
+    set_cached(cache_key, _TargetsCache(targets=targets), settings.stats_cache_ttl_seconds)
+    return targets
 
 
 def calculate_pivot_map_response(
