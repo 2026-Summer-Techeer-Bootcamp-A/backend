@@ -18,6 +18,10 @@ from app.schemas.match import (
     MatchWhatIfResponse,
     Pool,
 )
+from app.schemas.roadmap_difficulty import (
+    RoadmapDifficultyRequest,
+    RoadmapDifficultyResponse,
+)
 from app.schemas.roadmap_enrich import RoadmapEnrichRequest, RoadmapEnrichResponse
 from app.schemas.roadmap_node_content import (
     RoadmapNodeContentRequest,
@@ -35,6 +39,7 @@ from app.services.match import (
     get_skill_ids_from_session,
 )
 from app.services.rag.llm import get_llm
+from app.services.roadmap_difficulty import build_roadmap_difficulty
 from app.services.roadmap_enrich import build_roadmap_enrichment
 from app.services.roadmap_node_content import build_roadmap_node_content
 
@@ -329,6 +334,19 @@ def post_match_roadmap_node_content(
 ) -> RoadmapNodeContentResponse:
     """로드맵 노드 클릭 시 RAG로 학습 콘텐츠를 만들어 돌려준다. 실패해도 항상 200(폴백)."""
     return build_roadmap_node_content(request, llm=get_llm(), session=session)
+
+
+@router.post(
+    "/roadmap/difficulty",
+    response_model=RoadmapDifficultyResponse,
+)
+def post_match_roadmap_difficulty(
+    session: SessionDep,
+    request: RoadmapDifficultyRequest,
+) -> RoadmapDifficultyResponse:
+    """로드맵 노드 난이도를 시장 실데이터(공고 평균 요구 경력, 수요 건수)에 앵커링해
+    보정한다. 실패해도 항상 200(결정적 폴백)."""
+    return build_roadmap_difficulty(request, llm=get_llm(), session=session)
 
 
 @router.get(
