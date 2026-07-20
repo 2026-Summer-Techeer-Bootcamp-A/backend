@@ -187,7 +187,10 @@ def resume_posting_llm_compare(
     by_req_id = {req["id"]: req for req in requirements}
     rows = []
     for judgment in judgments:
-        req = by_req_id.get(judgment["req_id"], {"id": judgment["req_id"], "text": "", "source_quote": ""})
+        req = by_req_id.get(
+            judgment["req_id"],
+            {"id": judgment["req_id"], "text": "", "source_quote": "", "kind": "must"},
+        )
         rows.append(
             {
                 "id": req["id"],
@@ -197,6 +200,7 @@ def resume_posting_llm_compare(
                 "quote": judgment["quote"],
                 "rationale": judgment["rationale"],
                 "next_step": judgment["next_step"],
+                "requirement_kind": req.get("kind", "must"),
             }
         )
 
@@ -339,7 +343,10 @@ def posting_posting_llm_compare(
     by_req_id = {req["id"]: req for req in requirements}
     rows = []
     for judgment in judgments:
-        req = by_req_id.get(judgment["req_id"], {"id": judgment["req_id"], "text": "", "source_quote": ""})
+        req = by_req_id.get(
+            judgment["req_id"],
+            {"id": judgment["req_id"], "text": "", "source_quote": "", "kind": "must"},
+        )
         rows.append(
             {
                 "id": req["id"],
@@ -349,6 +356,7 @@ def posting_posting_llm_compare(
                 "quote": judgment["quote"],
                 "rationale": judgment["rationale"],
                 "next_step": judgment["next_step"],
+                "requirement_kind": req.get("kind", "must"),
             }
         )
 
