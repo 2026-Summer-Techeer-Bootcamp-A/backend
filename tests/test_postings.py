@@ -10,7 +10,20 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base, get_session
 from app.core.security import create_access_token
 from app.main import app
-from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill, User
+from app.models import (
+    Cert,
+    Concept,
+    Posting,
+    PostingCategory,
+    PostingCert,
+    PostingConcept,
+    PostingTech,
+    RawPosting,
+    Resume,
+    ResumeSkill,
+    Skill,
+    User,
+)
 
 
 @pytest.fixture
@@ -27,8 +40,9 @@ def client() -> Iterator[TestClient]:
         spring = Skill(canonical="Spring", category="framework")
         aws = Skill(canonical="AWS", category="cloud")
         aws_saa = Cert(name="AWS SAA")
+        msa = Concept(name="MSA", category="architecture")
         user = User(email="postings@example.com", password_hash="unused")
-        seed.add_all([python, spring, aws, aws_saa, user])
+        seed.add_all([python, spring, aws, aws_saa, msa, user])
         seed.flush()
 
         resume = Resume(user_id=user.id, title="Backend Resume", position="backend", pool="domestic")
@@ -108,6 +122,7 @@ def client() -> Iterator[TestClient]:
                 PostingTech(posting_id=newer.id, skill_id=spring.id),
                 PostingTech(posting_id=frontend.id, skill_id=aws.id),
                 PostingCert(posting_id=older.id, cert_id=aws_saa.id),
+                PostingConcept(posting_id=older.id, concept_id=msa.id),
                 RawPosting(posting_id=older.id, payload={"url": "https://example.com/wanted-1"}),
                 RawPosting(posting_id=newer.id, payload={"link": "https://example.com/jumpit-1"}),
                 RawPosting(posting_id=frontend.id, payload={"source_url": "https://example.com/wanted-2"}),
@@ -287,6 +302,7 @@ def test_get_posting_detail_returns_full_posting(client: TestClient) -> None:
         "categories": ["backend"],
         "skills": ["Python", "Spring"],
         "certs": ["AWS SAA"],
+        "concepts": [{"name": "MSA", "category": "architecture"}],
         "url": "https://example.com/wanted-1",
         "desc_sections": [],
     }
