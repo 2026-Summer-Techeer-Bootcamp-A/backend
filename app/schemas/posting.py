@@ -47,6 +47,11 @@ class DescSection(BaseModel):
     text: str
 
 
+class ConceptItem(BaseModel):
+    name: str
+    category: str
+
+
 class PostingDetailResponse(BaseModel):
     id: int
     source: str
@@ -65,6 +70,7 @@ class PostingDetailResponse(BaseModel):
     categories: list[str]
     skills: list[str]
     certs: list[str]
+    concepts: list[ConceptItem] = []
     url: str
     logo_url: str | None = None
     desc_sections: list[DescSection] = []

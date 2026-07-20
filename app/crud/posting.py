@@ -8,7 +8,19 @@ from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import Cert, Posting, PostingCategory, PostingCert, PostingTech, RawPosting, Resume, ResumeSkill, Skill
+from app.models import (
+    Cert,
+    Concept,
+    Posting,
+    PostingCategory,
+    PostingCert,
+    PostingConcept,
+    PostingTech,
+    RawPosting,
+    Resume,
+    ResumeSkill,
+    Skill,
+)
 from app.services.posting_description import normalize_jobkorea_sections
 from app.services.reference_cache import get_cached, make_reference_cache_key, set_cached
 
@@ -176,6 +188,7 @@ def get_posting_detail(session: Session, *, posting_id: int) -> dict:
         "categories": _get_posting_categories(session, posting.id),
         "skills": skill_map.get(posting.id, []),
         "certs": _get_posting_certs(session, posting.id),
+        "concepts": _get_posting_concepts(session, posting.id),
         "url": url_map.get(posting.id, ""),
         "logo_url": posting.logo_url,
         "desc_sections": desc_sections,
@@ -469,6 +482,20 @@ def _get_posting_certs(session: Session, posting_id: int) -> list[str]:
         .order_by(Cert.name.asc())
     ).scalars()
     return list(rows)
+
+
+def _get_posting_concepts(session: Session, posting_id: int) -> list[dict]:
+    rows = session.execute(
+        select(Concept.name, Concept.category)
+        .join(PostingConcept, PostingConcept.concept_id == Concept.id)
+        .where(
+            PostingConcept.posting_id == posting_id,
+            PostingConcept.is_deleted.is_(False),
+            Concept.is_deleted.is_(False),
+        )
+        .order_by(Concept.name.asc())
+    ).all()
+    return [{"name": name, "category": category} for name, category in rows]
 
 
 def _format_region(posting: Posting) -> str | None:
