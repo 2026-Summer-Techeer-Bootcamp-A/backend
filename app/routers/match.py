@@ -19,6 +19,10 @@ from app.schemas.match import (
     Pool,
 )
 from app.schemas.roadmap_enrich import RoadmapEnrichRequest, RoadmapEnrichResponse
+from app.schemas.roadmap_node_content import (
+    RoadmapNodeContentRequest,
+    RoadmapNodeContentResponse,
+)
 from app.services.match import (
     calculate_coverage_distribution_response,
     calculate_pivot_map_response,
@@ -32,6 +36,7 @@ from app.services.match import (
 )
 from app.services.rag.llm import get_llm
 from app.services.roadmap_enrich import build_roadmap_enrichment
+from app.services.roadmap_node_content import build_roadmap_node_content
 
 
 router = APIRouter()
@@ -312,6 +317,18 @@ def post_match_roadmap_enrich(
 ) -> RoadmapEnrichResponse:
     """로드맵을 LLM으로 보강해 구조화된 학습 순서를 돌려준다. 실패해도 항상 200(폴백)."""
     return build_roadmap_enrichment(request, llm=get_llm())
+
+
+@router.post(
+    "/roadmap/node-content",
+    response_model=RoadmapNodeContentResponse,
+)
+def post_match_roadmap_node_content(
+    session: SessionDep,
+    request: RoadmapNodeContentRequest,
+) -> RoadmapNodeContentResponse:
+    """로드맵 노드 클릭 시 RAG로 학습 콘텐츠를 만들어 돌려준다. 실패해도 항상 200(폴백)."""
+    return build_roadmap_node_content(request, llm=get_llm(), session=session)
 
 
 @router.get(
