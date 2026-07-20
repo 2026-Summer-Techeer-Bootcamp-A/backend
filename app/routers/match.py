@@ -18,6 +18,7 @@ from app.schemas.match import (
     MatchWhatIfResponse,
     Pool,
 )
+from app.schemas.roadmap_enrich import RoadmapEnrichRequest, RoadmapEnrichResponse
 from app.services.match import (
     calculate_coverage_distribution_response,
     calculate_pivot_map_response,
@@ -29,6 +30,8 @@ from app.services.match import (
     get_skill_ids_from_resume,
     get_skill_ids_from_session,
 )
+from app.services.rag.llm import get_llm
+from app.services.roadmap_enrich import build_roadmap_enrichment
 
 
 router = APIRouter()
@@ -298,6 +301,17 @@ def get_match_roadmap(
         steps=steps,
         only_open=True,
     )
+
+
+@router.post(
+    "/roadmap/enrich",
+    response_model=RoadmapEnrichResponse,
+)
+def post_match_roadmap_enrich(
+    request: RoadmapEnrichRequest,
+) -> RoadmapEnrichResponse:
+    """로드맵을 LLM으로 보강해 구조화된 학습 순서를 돌려준다. 실패해도 항상 200(폴백)."""
+    return build_roadmap_enrichment(request, llm=get_llm())
 
 
 @router.get(
