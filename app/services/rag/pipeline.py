@@ -134,7 +134,8 @@ def _dispatch(
         if r:
             out.append(r)
         return out, False
-    elif resume_text and posting_ids and len(posting_ids) == 1:
+    resume_compare_intents = {"compare", "resume_gap", "resume_coverage", "resume_market"}
+    if resume_text and posting_ids and len(posting_ids) == 1 and (p.intent in resume_compare_intents or not p.intent):
         # 이력서 확인 세션에 원문이 실려 있으면 태그 교집합 대신 LLM이 원문을 읽고
         # 요구사항별로 판정하는 경로를 탄다(compare_tool.resume_posting_llm_compare).
         # 원문이 없으면(세션 미첨부/만료) 아래 기존 태그 기반 분기를 그대로 쓴다.
@@ -149,8 +150,7 @@ def _dispatch(
         if r:
             out.append(r)
         return out, False
-    resume_compare_intents = {"compare", "resume_gap", "resume_coverage", "resume_market"}
-    if owned_skill_ids and posting_ids and (p.intent in resume_compare_intents or not p.intent):
+    elif owned_skill_ids and posting_ids and (p.intent in resume_compare_intents or not p.intent):
         r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, posting_ids[0])
         if r:
             out.append(r)
