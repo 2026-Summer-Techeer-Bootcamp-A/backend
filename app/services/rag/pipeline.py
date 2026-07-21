@@ -114,7 +114,7 @@ def _dispatch(
         if r:
             out.append(r)
         return out, False
-    elif owned_skill_ids and posting_ids:
+    elif owned_skill_ids and posting_ids and p.intent != "semantic_search":
         r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, posting_ids[0])
         if r:
             out.append(r)
@@ -130,7 +130,16 @@ def _dispatch(
         if r:
             out.append(r)
     elif p.intent == "semantic_search":
-        r = _run(vector_tool.semantic_search, session, p.subqueries[0] if p.subqueries else "", pool, verbose=verbose)
+        search_query = p.subqueries[0] if p.subqueries else ""
+        if posting_ids:
+            try:
+                row = session.execute(text("SELECT title FROM posting WHERE id = :pid"), {"pid": posting_ids[0]}).first()
+                if row and row.title:
+                    clean_q = re.sub(r'(이거|이\s*공고|이것|해당\s*공고)(랑|와|의|등|들)?', '', search_query).strip()
+                    search_query = f"{row.title} {clean_q}".strip()
+            except Exception:
+                pass
+        r = _run(vector_tool.semantic_search, session, search_query, pool, verbose=verbose)
         if r:
             out.append(r)
     elif p.intent == "skill_demand" and skill:
