@@ -156,8 +156,85 @@ _PLANNER_SYSTEM = (
 )
 
 
+_MULTI_WORD_SKILLS = {
+    # Mobile
+    "react native": "React Native",
+    "flutter": "Flutter",
+    "swift": "Swift",
+    "kotlin": "Kotlin",
+    "objective-c": "Objective-C",
+    "android": "Android",
+    "ios": "iOS",
+
+    # Frontend
+    "react.js": "React",
+    "reactjs": "React",
+    "vue.js": "Vue.js",
+    "vuejs": "Vue.js",
+    "next.js": "Next.js",
+    "nextjs": "Next.js",
+    "nuxt.js": "Nuxt.js",
+    "nuxtjs": "Nuxt.js",
+    "svelte": "Svelte",
+    "angular": "Angular",
+    "typescript": "TypeScript",
+    "javascript": "JavaScript",
+    "tailwind": "Tailwind CSS",
+    "tailwindcss": "Tailwind CSS",
+    "redux": "Redux",
+    "zustand": "Zustand",
+
+    # Backend
+    "spring boot": "Spring Boot",
+    "springboot": "Spring Boot",
+    "spring": "Spring",
+    "node.js": "Node.js",
+    "nodejs": "Node.js",
+    "express": "Express",
+    "nest.js": "NestJS",
+    "nestjs": "NestJS",
+    "fastapi": "FastAPI",
+    "django": "Django",
+    "flask": "Flask",
+    "ruby on rails": "Ruby on Rails",
+    "laravel": "Laravel",
+    "asp.net": "ASP.NET",
+
+    # Data & AI
+    "pytorch": "PyTorch",
+    "tensorflow": "TensorFlow",
+    "scikit-learn": "scikit-learn",
+    "pandas": "pandas",
+    "numpy": "NumPy",
+    "langchain": "LangChain",
+
+    # DevOps & DB
+    "docker": "Docker",
+    "kubernetes": "Kubernetes",
+    "k8s": "Kubernetes",
+    "aws": "AWS",
+    "gcp": "GCP",
+    "azure": "Azure",
+    "postgresql": "PostgreSQL",
+    "postgres": "PostgreSQL",
+    "mysql": "MySQL",
+    "mariadb": "MariaDB",
+    "mongodb": "MongoDB",
+    "redis": "Redis",
+    "elasticsearch": "Elasticsearch",
+    "kafka": "Kafka",
+    "graphql": "GraphQL",
+    "grpc": "gRPC",
+}
+
+
 def _detect_skill(session: Session, q: str) -> str | None:
     """폴백용: 질문에 등장하는 가장 긴 기술 정규명(2자 이상)을 찾는다."""
+    q_low = q.lower()
+    for kw, canonical in _MULTI_WORD_SKILLS.items():
+        if kw in q_low:
+            return canonical
+
     row = session.execute(
         text(
             "SELECT canonical FROM skill "

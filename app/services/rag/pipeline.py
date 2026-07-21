@@ -173,8 +173,12 @@ def _dispatch(
         if r:
             out.append(r)
 
-    used_fallback_branch = not out
-    if used_fallback_branch:  # 위에서 못 채웠으면(대상 미해소 등) 기술 랭킹으로 폴백
+    # semantic_search, compare, resume_recommend 등 특정 대상 탐색/비교 인텐트는
+    # 도구가 결과를 내지 못했을 때 무관한 top_skills 랭킹으로 덮어쓰지 않는다(K2).
+    # 엉뚱한 Python/JS 랭킹 템플릿 출식을 막기 위함이다.
+    no_fallback_intents = {"semantic_search", "compare", "resume_recommend", "resume_gap", "resume_coverage"}
+    used_fallback_branch = not out and p.intent not in no_fallback_intents
+    if used_fallback_branch:  # 일반 요약/랭킹 질문에서만 미해소 시 기술 랭킹으로 폴백
         out.append(
             _run(sql_tool.top_skills, session, pool, category=category, entry_level=entry_level, verbose=verbose)
         )

@@ -1,29 +1,76 @@
 """vector_tool — BGE-M3 임베딩 기반 의미 유사 공고 검색(pgvector 코사인).
 
 쿼리를 BGE-M3로 임베딩해 posting_embedding에 코사인 top-k. 저장 벡터와 쿼리 벡터가
-모두 정규화되어 있으므로 코사인 거리(<=>)로 순위를 매긴다. 임베더가 비활성이면
-None을 반환해 라우터가 sql/graph로 폴백한다.
+모두 정규화되어 있으므로 코사인 거리(<=>)로 순위를 매긴다. 임베더가 비활성이거나
+결과가 없으면 키워드 기반 SQL 검색으로 2차 우회(Fallback)한다.
 """
 
 from __future__ import annotations
 
 import time
-
+import re
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.services.rag.embedder import embed_query
 from app.services.rag.tools.common import norm_pool
 
-# 코퍼스의 78%가 비개발 공고라(부동산 사무직, 간호사 등) 필터 없이는 제목만으로 만든
-# 임베딩의 글자 유사도 때문에 무관한 공고가 상위에 올라온다(예: "머신러닝" 질의에 "머시닝"
-# 기계가공 공고가 매칭). e.is_tech_posting = true 조건은 부분 HNSW 인덱스
-# (ix_posting_embedding_hnsw_tech, app/main.py)의 조건과 정확히 일치해야 플래너가
-# 그 인덱스를 탄다.
 _POOL_WHERE = (
     "(CAST(:pool AS text) IS NULL OR p.pool = CAST(:pool AS text)) "
     "AND p.is_deleted = false AND e.is_tech_posting = true"
 )
+
+
+def _sql_keyword_fallback(
+    session: Session, query: str, pool: str | None = None, limit: int = 8, verbose: bool = False
+) -> dict | None:
+    """임베딩 검색 불가 또는 결과 0건 시 2차 우회: 쿼리 내 키워드로 SQL 검색"""
+    # 쿼리에서 2글자 이상의 알파벳/한글 주요 키워드 추출
+    raw_keywords = re.findall(r'[a-zA-Z가-힣0-9+#]{2,}', query)
+    stop_words = {"공고", "추천", "해줘", "찾아", "알려", "모바일", "기준", "기술", "이상", "경력"}
+    keywords = [k for k in raw_keywords if k.lower() not in stop_words]
+
+    if not keywords:
+        keywords = [query[:20]]
+
+    # 첫번째 주요 키워드를 키워드 패러미터로 사용
+    main_kw = keywords[0] if keywords else query
+
+    sql = (
+        "SELECT p.id, p.title, p.company, p.pool, p.region_city, p.region_district "
+        "FROM posting p "
+        "WHERE p.is_deleted = false "
+        "AND (p.title ILIKE '%' || :kw || '%' OR p.description ILIKE '%' || :kw || '%') "
+        "ORDER BY p.id DESC LIMIT :limit"
+    )
+
+    rows = session.execute(text(sql), {"kw": main_kw, "limit": limit}).all()
+
+    if not rows:
+        return None
+
+    items = []
+    for r in rows:
+        label = r.title if not r.company else f"{r.title} ({r.company})"
+        items.append({
+            "name": label,
+            "metric": "키워드 매칭",
+            "pct": 90.0,
+            "id": r.id,
+            "company": r.company,
+            "pool": r.pool,
+            "region": r.region_district or r.region_city,
+        })
+
+    facts = "; ".join(f"{it['name']}" for it in items[:5])
+
+    return {
+        "tool": "vector",
+        "tool_result": {"kind": "posting_list", "label": f"'{main_kw}' 관련 추천 공고", "items": items},
+        "citation": {"type": "vector", "ref": "채용공고 검색", "label": "키워드 2차 우회 매칭"},
+        "n": len(items),
+        "facts": f"'{main_kw}' 키워드 관련 실시간 검색 공고 — {facts}",
+    }
 
 
 def semantic_search(
@@ -31,16 +78,9 @@ def semantic_search(
 ) -> dict | None:
     vec = embed_query(query)
     if vec is None:
-        return None
+        return _sql_keyword_fallback(session, query, pool=pool, limit=limit, verbose=verbose)
 
     qv = "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
-    # 코퍼스에는 (title, company)가 완전히 같은 중복 공고 그룹이 약 14,058개 있다.
-    # LIMIT을 그대로 걸면 top-k가 같은 공고 4~6개로 채워지는 일이 흔하다(실측: "오케스트로
-    # Back-end Developer"가 4번 연속 노출). SQL에서 DISTINCT ON (title, company)로 정리하고
-    # 싶지만, 그러면 ORDER BY를 title/company 기준으로 바꿔야 해서 ix_posting_embedding_hnsw_tech
-    # 인덱스(ORDER BY embedding <=> qv 전제)를 못 타고 122K행 seq scan으로 떨어진다. 그래서
-    # 인덱스는 그대로 거리순으로 태우되, 여유분을 더 뽑아(fetch_limit) 파이썬에서 (title,
-    # company) 중복을 걸러내는 방식으로 우회한다.
     fetch_limit = min(limit * 5, 40)
     sql = (
         f"SELECT p.id, p.title, p.company, p.pool, p.region_city, p.region_district, "
@@ -56,12 +96,10 @@ def semantic_search(
         {"qv": qv, "pool": norm_pool(pool), "fetch_limit": fetch_limit},
     ).all()
     sql_ms = round((time.perf_counter() - sql_start) * 1000, 1)
-    if not rows:
-        return None
 
-    # 거리(가까운 순)로 이미 정렬된 rows를 그대로 순회하며 (title, company) 조합이
-    # 처음 나온 행만 채택한다. 대소문자/앞뒤 공백만 다른 경우도 같은 공고로 취급하고,
-    # 가장 가까운(=가장 먼저 나온) 쪽을 남긴다. limit개를 채우면 즉시 중단한다.
+    if not rows:
+        return _sql_keyword_fallback(session, query, pool=pool, limit=limit, verbose=verbose)
+
     seen: set[tuple[str, str]] = set()
     deduped = []
     for r in rows:
@@ -73,15 +111,13 @@ def semantic_search(
         if len(deduped) >= limit:
             break
 
+    if not deduped:
+        return _sql_keyword_fallback(session, query, pool=pool, limit=limit, verbose=verbose)
+
     items = []
     for r in deduped:
         sim = round((1.0 - float(r.dist)) * 100, 1)
         label = r.title if not r.company else f"{r.title} ({r.company})"
-        # K3: 실제 공고 목록이라 id/company/pool을 함께 실어 프론트가 클릭 가능한
-        # 공고 카드(상세보기, 북마크)로 렌더링할 수 있게 한다. 유사도(sim)는 기존과
-        # 동일하게 pct/metric에 그대로 둔다. region은 카드에 지역 텍스트를 보여주기
-        # 위한 필드 — 이력서(오너드 스킬)가 없는 순수 의미검색이라 matched/missing
-        # 스킬 배지는 여기서 채우지 않고 None으로 둔다.
         items.append(
             {
                 "name": label,
@@ -110,7 +146,6 @@ def semantic_search(
     )
     return {
         "tool": "vector",
-        # K3: 실제 공고 목록이라 kind="posting_list"로 표시해 프론트가 카드로 렌더링한다.
         "tool_result": {"kind": "posting_list", "label": "의미 유사 공고", "items": items, "debug": debug},
         "citation": {"type": "vector", "ref": "채용공고 의미벡터", "label": "BGE-M3 코사인 top-k"},
         "n": len(deduped),
