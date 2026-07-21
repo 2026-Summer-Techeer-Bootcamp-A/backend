@@ -1,4 +1,4 @@
-﻿from collections.abc import Iterator
+from collections.abc import Iterator
 from datetime import date
 
 import pytest
@@ -78,7 +78,7 @@ def client() -> Iterator[TestClient]:
             company="Kakao",
             title="Backend Platform Engineer",
             post_date=date(2026, 7, 5),
-            close_date=date(2026, 7, 20),
+            close_date=date(2026, 7, 28),
         )
         frontend = Posting(
             source="wanted",
@@ -153,7 +153,7 @@ def test_get_postings_returns_filtered_latest_cards(client: TestClient) -> None:
                 "title": "Backend Platform Engineer",
                 "company": "Kakao",
                 "post_date": "2026-07-05",
-                "close_date": "2026-07-20",
+                "close_date": "2026-07-28",
                 "skills": ["Spring"],
                 "url": "https://example.com/jumpit-1",
             },
