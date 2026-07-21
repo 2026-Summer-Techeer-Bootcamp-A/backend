@@ -39,6 +39,7 @@ def _attach_skills_and_concepts(session: Session, items: list[dict]) -> None:
             for r in skill_rows:
                 posting_skills.setdefault(r.posting_id, []).append(r.canonical)
         except Exception:
+            session.rollback()
             pass
 
         try:
@@ -51,6 +52,7 @@ def _attach_skills_and_concepts(session: Session, items: list[dict]) -> None:
             for r in concept_rows:
                 posting_concepts.setdefault(r.posting_id, []).append(r.name)
         except Exception:
+            session.rollback()
             pass
 
     for it in items:

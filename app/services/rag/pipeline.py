@@ -73,6 +73,7 @@ def _attach_single_posting_facts(session: Session, posting_id: int) -> dict | No
             "facts": facts_text,
         }
     except Exception:
+        session.rollback()
         return None
 
 
@@ -182,6 +183,7 @@ def _dispatch(
                     clean_q = re.sub(r'(이거|이\s*공고|이것|해당\s*공고)(랑|와|의|등|들)?', '', search_query).strip()
                     search_query = f"{row.title} {clean_q}".strip()
             except Exception:
+                session.rollback()
                 pass
         r = _run(vector_tool.semantic_search, session, search_query, pool, verbose=verbose)
         if r:
