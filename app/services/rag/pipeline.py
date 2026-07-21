@@ -41,9 +41,44 @@ def _confidence_level(n: int) -> int:
     return 5
 
 
+def _attach_single_posting_facts(session: Session, posting_id: int) -> dict | None:
+    try:
+        sql = (
+            "SELECT p.title, p.company, p.pool, p.region_city, p.region_district, "
+            "string_agg(s.canonical, ', ') as skills "
+            "FROM posting p "
+            "LEFT JOIN posting_skill ps ON ps.posting_id = p.id AND ps.is_deleted = false "
+            "LEFT JOIN skill s ON s.id = ps.skill_id "
+            "WHERE p.id = :pid "
+            "GROUP BY p.id, p.title, p.company, p.pool, p.region_city, p.region_district"
+        )
+        row = session.execute(text(sql), {"pid": posting_id}).first()
+        if not row:
+            return None
+        skills_str = row.skills or "기본 요구 기술"
+        region_str = f" ({row.region_district or row.region_city})" if (row.region_district or row.region_city) else ""
+        comp_str = f" ({row.company})" if row.company else ""
+        facts_text = f"첨부 공고 '{row.title}'{comp_str}{region_str} 요구 기술 스택 — {skills_str}"
+        return {
+            "tool": "sql",
+            "tool_result": {
+                "kind": "stat",
+                "label": f"'{row.title}' 공고 상세 요구사항",
+                "items": [{"name": row.title, "metric": skills_str}],
+            },
+            "citation": {"type": "sql", "ref": f"공고 {row.title}", "label": "첨부 공고 기술 상세 분석"},
+            "n": 1,
+            "facts": facts_text,
+        }
+    except Exception:
+        return None
+
+
 def _dispatch(
     session: Session,
     p: Plan,
+    *,
+    pool: str | None = None,
     verbose: bool = False,
     owned_skill_ids: set[int] | None = None,
     posting_ids: list[int] | None = None,
@@ -114,7 +149,8 @@ def _dispatch(
         if r:
             out.append(r)
         return out, False
-    elif owned_skill_ids and posting_ids and p.intent != "semantic_search":
+    resume_compare_intents = {"compare", "resume_gap", "resume_coverage", "resume_market"}
+    if owned_skill_ids and posting_ids and (p.intent in resume_compare_intents or not p.intent):
         r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, posting_ids[0])
         if r:
             out.append(r)
@@ -124,6 +160,12 @@ def _dispatch(
         if r:
             out.append(r)
         return out, False
+
+    # 공고 1개 첨부 시 해당 공고 단독 요구 기술 및 정보 팩트 부착
+    if posting_ids and len(posting_ids) == 1:
+        posting_info_fact = _run(_attach_single_posting_facts, session, posting_ids[0])
+        if posting_info_fact:
+            out.append(posting_info_fact)
 
     if p.intent == "cooccurrence" and skill:
         r = _run(graph_tool.co_occurring_skills, session, skill, pool, verbose=verbose)
