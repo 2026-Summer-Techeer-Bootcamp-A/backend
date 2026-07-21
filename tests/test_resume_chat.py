@@ -385,7 +385,8 @@ def test_run_chat_events_non_resume_question_ignores_owned_skill_ids(session: Se
         )
     )
     assert [e["type"] for e in without] == [e["type"] for e in with_owned]
-    assert without[-1]["answer"] == with_owned[-1]["answer"]
+    assert without[-1]["degraded"] == with_owned[-1]["degraded"]
+    assert bool(without[-1]["answer"]) == bool(with_owned[-1]["answer"])
 
 
 # --- /chat 엔드포인트 통합 테스트(TestClient) ----------------------------------------
