@@ -1,0 +1,419 @@
+{
+  "answer": "TypeScript을(를) 요구하는 공고 10,141건 기준 동반 기술 비율 — JavaScript 74.6%; AWS 37.1%; Git 36.7%; Node.js 32.7%; React 29.4%; Python 23.8%; CSS 21.5%; Docker 19.6%",
+  "route": "graph",
+  "plan": {
+    "intent": "cooccurrence",
+    "subqueries": [
+      "React 공고 중 TypeScript와 함께 요구하는 공고 비율과 주니어 신입 채용 현황 알려줘"
+    ],
+    "tools": [
+      "graph"
+    ],
+    "pool": null,
+    "entities": {
+      "skill": "TypeScript",
+      "entry_level": true
+    }
+  },
+  "steps": [
+    {
+      "kind": "plan",
+      "tool": null,
+      "label": "질문 분해",
+      "detail": "intent=cooccurrence · tools=graph · skill=TypeScript · 신입 · (휴리스틱 폴백)",
+      "duration_ms": 193.9,
+      "debug": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.0,
+        "attempts": 1,
+        "latency_ms": 169.2,
+        "error": "HTTP Error 400: Bad Request"
+      }
+    },
+    {
+      "kind": "tool",
+      "tool": "graph",
+      "label": "TypeScript 동반 기술(공동출현)",
+      "detail": "TypeScript 요구 공고 10,141건의 동반 기술",
+      "duration_ms": 1399.0,
+      "debug": null
+    },
+    {
+      "kind": "eval",
+      "tool": null,
+      "label": "근거 충분성 검증",
+      "detail": "pass · 근거 표본 10,141건",
+      "duration_ms": 0.0,
+      "debug": null
+    },
+    {
+      "kind": "synth",
+      "tool": null,
+      "label": "답변 합성",
+      "detail": "LLM 폴백(템플릿)",
+      "duration_ms": 158.9,
+      "debug": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.3,
+        "attempts": 1,
+        "latency_ms": 158.6,
+        "error": "HTTP Error 400: Bad Request"
+      }
+    }
+  ],
+  "tool_results": [
+    {
+      "kind": "graph",
+      "label": "TypeScript 동반 기술(공동출현)",
+      "items": [
+        {
+          "name": "JavaScript",
+          "metric": "74.6%",
+          "pct": 74.6,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "AWS",
+          "metric": "37.1%",
+          "pct": 37.1,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Git",
+          "metric": "36.7%",
+          "pct": 36.7,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Node.js",
+          "metric": "32.7%",
+          "pct": 32.7,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "React",
+          "metric": "29.4%",
+          "pct": 29.4,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Python",
+          "metric": "23.8%",
+          "pct": 23.8,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "CSS",
+          "metric": "21.5%",
+          "pct": 21.5,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Docker",
+          "metric": "19.6%",
+          "pct": 19.6,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        }
+      ],
+      "value": null,
+      "unit": null,
+      "nodes": [
+        {
+          "id": "TypeScript",
+          "root": true,
+          "hop": 0
+        },
+        {
+          "id": "JavaScript",
+          "hop": 1
+        },
+        {
+          "id": "AWS",
+          "hop": 1
+        },
+        {
+          "id": "Git",
+          "hop": 1
+        },
+        {
+          "id": "Node.js",
+          "hop": 1
+        },
+        {
+          "id": "React",
+          "hop": 1
+        },
+        {
+          "id": "Python",
+          "hop": 1
+        },
+        {
+          "id": "CSS",
+          "hop": 1
+        },
+        {
+          "id": "Docker",
+          "hop": 1
+        }
+      ],
+      "edges": [
+        {
+          "source": "TypeScript",
+          "target": "JavaScript",
+          "strength": 74.6,
+          "n": 7570,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "AWS",
+          "strength": 37.1,
+          "n": 3767,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "Git",
+          "strength": 36.7,
+          "n": 3726,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "Node.js",
+          "strength": 32.7,
+          "n": 3319,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "React",
+          "strength": 29.4,
+          "n": 2979,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "Python",
+          "strength": 23.8,
+          "n": 2418,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "CSS",
+          "strength": 21.5,
+          "n": 2183,
+          "hop": 1
+        },
+        {
+          "source": "TypeScript",
+          "target": "Docker",
+          "strength": 19.6,
+          "n": 1988,
+          "hop": 1
+        },
+        {
+          "source": "Python",
+          "target": "AWS",
+          "strength": 83.7,
+          "n": 8484,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "Node.js",
+          "strength": 75.6,
+          "n": 7667,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "Git",
+          "strength": 69.7,
+          "n": 7065,
+          "hop": 2
+        },
+        {
+          "source": "AWS",
+          "target": "Git",
+          "strength": 67.4,
+          "n": 6835,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "AWS",
+          "strength": 66.8,
+          "n": 6770,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "CSS",
+          "strength": 64.0,
+          "n": 6493,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "Git",
+          "strength": 57.7,
+          "n": 5854,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "React",
+          "strength": 55.3,
+          "n": 5607,
+          "hop": 2
+        },
+        {
+          "source": "AWS",
+          "target": "Docker",
+          "strength": 53.5,
+          "n": 5425,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "JavaScript",
+          "strength": 52.5,
+          "n": 5326,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "Docker",
+          "strength": 47.8,
+          "n": 4843,
+          "hop": 2
+        },
+        {
+          "source": "Docker",
+          "target": "Git",
+          "strength": 41.9,
+          "n": 4245,
+          "hop": 2
+        },
+        {
+          "source": "Node.js",
+          "target": "AWS",
+          "strength": 36.9,
+          "n": 3740,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "Docker",
+          "strength": 33.4,
+          "n": 3391,
+          "hop": 2
+        },
+        {
+          "source": "Node.js",
+          "target": "Git",
+          "strength": 25.4,
+          "n": 2573,
+          "hop": 2
+        },
+        {
+          "source": "CSS",
+          "target": "Git",
+          "strength": 24.2,
+          "n": 2455,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "Node.js",
+          "strength": 22.5,
+          "n": 2278,
+          "hop": 2
+        },
+        {
+          "source": "React",
+          "target": "Git",
+          "strength": 21.8,
+          "n": 2214,
+          "hop": 2
+        },
+        {
+          "source": "React",
+          "target": "CSS",
+          "strength": 20.9,
+          "n": 2115,
+          "hop": 2
+        },
+        {
+          "source": "Node.js",
+          "target": "Docker",
+          "strength": 17.8,
+          "n": 1803,
+          "hop": 2
+        }
+      ],
+      "compare": null,
+      "debug": null,
+      "facts": "TypeScript을(를) 요구하는 공고 10,141건 기준 동반 기술 비율 — JavaScript 74.6%; AWS 37.1%; Git 36.7%; Node.js 32.7%; React 29.4%; Python 23.8%; CSS 21.5%; Docker 19.6%"
+    }
+  ],
+  "citations": [
+    {
+      "type": "graph",
+      "ref": "TypeScript 동반출현",
+      "label": "TypeScript 요구 공고 10,141건의 동반 기술"
+    }
+  ],
+  "confidence": {
+    "level": 5,
+    "n": 10141
+  },
+  "degraded": true,
+  "degraded_reasons": [
+    "의도 분류가 실패해 휴리스틱 규칙으로 대체됐어요",
+    "LLM 합성 대신 사실을 그대로 이어붙인 답으로 대체됐어요"
+  ],
+  "total_duration_ms": 1752.4
+}

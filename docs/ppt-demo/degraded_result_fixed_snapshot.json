@@ -1,0 +1,183 @@
+{
+  "answer": "'React' 키워드 관련 실시간 검색 공고 — 중견기업 - 유명 제조회사 : 케미컬 합성용 Reactor 설계,개발 대리,과장,차장급 채용(굿커리어) (굿커리어); React/Meteor 개발자를 채용. (윈카); React 개발자 채용. (아이엘포유); NODE.JS , react.js 개발자 모집 (㈜애드크림); 웹 개발 (Python,React,MariaDB) 경력직 채용 (트래포트㈜)",
+  "route": "vector",
+  "plan": {
+    "intent": "semantic_search",
+    "subqueries": [
+      "React Native로 모바일 앱 만드는 공고 추천"
+    ],
+    "tools": [
+      "vector"
+    ],
+    "pool": null,
+    "entities": {
+      "skill": "React Native"
+    }
+  },
+  "steps": [
+    {
+      "kind": "plan",
+      "tool": null,
+      "label": "질문 분해",
+      "detail": "intent=semantic_search · tools=vector · skill=React Native · (휴리스틱 폴백)",
+      "duration_ms": 160.5,
+      "debug": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.0,
+        "attempts": 1,
+        "latency_ms": 159.4,
+        "error": "HTTP Error 400: Bad Request"
+      }
+    },
+    {
+      "kind": "tool",
+      "tool": "vector",
+      "label": "'React' 관련 추천 공고",
+      "detail": "키워드 2차 우회 매칭",
+      "duration_ms": 15551.9,
+      "debug": null
+    },
+    {
+      "kind": "eval",
+      "tool": null,
+      "label": "근거 충분성 검증",
+      "detail": "pass · 근거 표본 8건",
+      "duration_ms": 0.0,
+      "debug": null
+    },
+    {
+      "kind": "synth",
+      "tool": null,
+      "label": "답변 합성",
+      "detail": "LLM 폴백(템플릿)",
+      "duration_ms": 155.2,
+      "debug": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.3,
+        "attempts": 1,
+        "latency_ms": 155.0,
+        "error": "HTTP Error 400: Bad Request"
+      }
+    }
+  ],
+  "tool_results": [
+    {
+      "kind": "posting_list",
+      "label": "'React' 관련 추천 공고",
+      "items": [
+        {
+          "name": "중견기업 - 유명 제조회사 : 케미컬 합성용 Reactor 설계,개발 대리,과장,차장급 채용(굿커리어) (굿커리어)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 562868,
+          "company": "굿커리어",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "React/Meteor 개발자를 채용. (윈카)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 527101,
+          "company": "윈카",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "React 개발자 채용. (아이엘포유)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 521663,
+          "company": "아이엘포유",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "NODE.JS , react.js 개발자 모집 (㈜애드크림)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 505009,
+          "company": "㈜애드크림",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "웹 개발 (Python,React,MariaDB) 경력직 채용 (트래포트㈜)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 492551,
+          "company": "트래포트㈜",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "(외래강사모집)자바,스프링,안드로이드,Node.JS,AngularJS,jQUERY,React (탑크리에듀학원)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 438242,
+          "company": "탑크리에듀학원",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "[키즈팩토리] 웹개발 담당 모집 (웹, React Native) (키즈팩토리)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 381523,
+          "company": "키즈팩토리",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "개발 고수님 (react-native / python) 보세용 (페이체크)",
+          "metric": "키워드 매칭",
+          "pct": 90.0,
+          "id": 370961,
+          "company": "페이체크",
+          "pool": "domestic",
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        }
+      ],
+      "value": null,
+      "unit": null,
+      "nodes": [],
+      "edges": [],
+      "compare": null,
+      "debug": null,
+      "facts": "'React' 키워드 관련 실시간 검색 공고 — 중견기업 - 유명 제조회사 : 케미컬 합성용 Reactor 설계,개발 대리,과장,차장급 채용(굿커리어) (굿커리어); React/Meteor 개발자를 채용. (윈카); React 개발자 채용. (아이엘포유); NODE.JS , react.js 개발자 모집 (㈜애드크림); 웹 개발 (Python,React,MariaDB) 경력직 채용 (트래포트㈜)"
+    }
+  ],
+  "citations": [
+    {
+      "type": "vector",
+      "ref": "채용공고 검색",
+      "label": "키워드 2차 우회 매칭"
+    }
+  ],
+  "confidence": {
+    "level": 2,
+    "n": 8
+  },
+  "degraded": true,
+  "degraded_reasons": [
+    "의도 분류가 실패해 휴리스틱 규칙으로 대체됐어요",
+    "LLM 합성 대신 사실을 그대로 이어붙인 답으로 대체됐어요"
+  ],
+  "total_duration_ms": 15868.2
+}
