@@ -379,7 +379,9 @@ def _heuristic(session: Session, q: str, pool: str | None) -> Plan:
             subqueries=[q],
         )
 
-    if any(k in low for k in _COMPARE_KW):
+    if any(k in q for k in _SEMANTIC_KW):
+        intent = "semantic_search"
+    elif any(k in low for k in _COMPARE_KW):
         skills_multi = _detect_skills_multi(session, q)
         if len(skills_multi) >= 2:
             return Plan(
@@ -389,10 +391,8 @@ def _heuristic(session: Session, q: str, pool: str | None) -> Plan:
                 entities={"skills": skills_multi, **_build_entities(None, job_category, entry_level)},
                 subqueries=[q],
             )
-    if skill and any(k in low for k in _COOCCUR_KW):
+    elif skill and any(k in low for k in _COOCCUR_KW):
         intent = "cooccurrence"
-    elif any(k in q for k in _SEMANTIC_KW):
-        intent = "semantic_search"
     elif any(k in low for k in _CERT_KW):
         intent = "cert_ranking"
     elif any(k in low for k in _CONCEPT_KW):

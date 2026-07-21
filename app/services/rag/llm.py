@@ -169,10 +169,11 @@ class GeminiClient:
                     parsed = json.loads(resp.read().decode("utf-8"))
             except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError, ValueError) as exc:
                 last_error = exc
-                # 4xx(잘못된 요청/인증 등)는 똑같은 요청을 다시 보내도 항상 같은 결과라 재시도해도
-                # 성공할 수 없다 — 지연만 늘리므로 즉시 포기한다. 재시도는 타임아웃/네트워크
-                # 문제나 5xx(서버 일시 장애)처럼 다시 시도하면 성공할 수도 있는 경우만 대상이다.
+                # 4xx(잘못된 요청/인증 실패/만료 키 등)는 재시도해도 성공할 수 없다 — 지연을 방지하기 위해 즉시 중단한다.
                 if isinstance(exc, urllib.error.HTTPError) and 400 <= exc.code < 500:
+                    break
+                # API 키가 유효하지 않은 경우(INVALID_KEY 등) URLError/HTTPError 발생 시 재시도 없이 중단
+                if "INVALID" in str(settings.gemini_api_key).upper() or "EXPIRED" in str(settings.gemini_api_key).upper():
                     break
                 continue
 
