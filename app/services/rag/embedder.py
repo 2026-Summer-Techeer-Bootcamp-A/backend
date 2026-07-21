@@ -27,7 +27,12 @@ def _load():
     try:
         from sentence_transformers import SentenceTransformer
 
-        _model = SentenceTransformer(settings.embedding_model, device="cpu")
+        try:
+            _model = SentenceTransformer(settings.embedding_model, device="cpu")
+        except (PermissionError, OSError):
+            cache_dir = "/tmp/models"
+            os.makedirs(cache_dir, exist_ok=True)
+            _model = SentenceTransformer(settings.embedding_model, device="cpu", cache_folder=cache_dir)
     except Exception:
         # 폴백(벡터 검색 비활성화 후 sql/graph로 대체) 자체는 의도된 동작이므로 유지한다.
         # 다만 이 예외를 통째로 삼키면(예: /models 볼륨 권한 문제로 모델 다운로드가 매번
