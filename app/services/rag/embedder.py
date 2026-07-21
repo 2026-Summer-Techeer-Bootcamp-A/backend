@@ -10,6 +10,7 @@ GPU가 없으므로 CPU로 추론한다. 모델 로딩은 RAM 2~3GB를 쓰므로
 from __future__ import annotations
 
 import logging
+import os
 
 from app.core.config import settings
 

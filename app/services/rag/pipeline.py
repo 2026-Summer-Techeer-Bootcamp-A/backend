@@ -8,10 +8,12 @@ yield하면서, 동시에 collect 딕셔너리에 조립용 원본 객체(Plan/S
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Iterator
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.services.rag.evaluator import evaluate
