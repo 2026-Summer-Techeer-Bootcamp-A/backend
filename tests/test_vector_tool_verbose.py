@@ -6,6 +6,7 @@ embed_query는 고정 벡터로 monkeypatch해 실 BGE-M3 모델 로딩 없이 S
 """
 
 import os
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -26,9 +27,14 @@ def session(pg_conn: object) -> Iterator[Session]:
     engine = create_engine(os.environ["DATABASE_URL"])
     testing_session = sessionmaker(bind=engine, expire_on_commit=False)
     with testing_session() as s:
+        # 이전 실패 잔재 정리
+        s.execute(text("DELETE FROM posting WHERE source = 'verbose-test'"))
+        s.commit()
+
+        uid = f"verbose-{uuid.uuid4().hex[:8]}"
         posting = Posting(
             source="verbose-test",
-            source_uid="verbose-1",
+            source_uid=uid,
             pool="domestic",
             title="테스트 공고",
             company="테스트컴퍼니",
@@ -47,6 +53,7 @@ def session(pg_conn: object) -> Iterator[Session]:
         try:
             yield s
         finally:
+            s.rollback()
             s.execute(text("DELETE FROM posting_embedding WHERE id = :id"), {"id": posting_id})
             s.execute(text("DELETE FROM posting WHERE id = :id"), {"id": posting_id})
             s.commit()
