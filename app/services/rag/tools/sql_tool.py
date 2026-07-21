@@ -129,14 +129,13 @@ def top_skills(
         citation_label = (
             f"기술태그 집계 · 공고 {total:,}건{_filter_citation_suffix(category, entry_level)}"
         )
-        facts = (
-            f"pool={pool or '전체'} 직군={category or '전체'} "
-            f"신입={'예' if entry_level else '무관'} 총 {total:,}건 기준 상위 기술 — {facts_body}"
-        )
-    else:
-        label = "수요 상위 기술"
-        citation_label = f"기술태그 집계 · 공고 {total:,}건"
-        facts = f"pool={pool or '전체'} 총 {total:,}건 기준 상위 기술 — {facts_body}"
+        filter_desc = []
+        if category:
+            filter_desc.append(f"{category} 직군")
+        if entry_level:
+            filter_desc.append("신입")
+        scope_str = f" ({', '.join(filter_desc)})" if filter_desc else ""
+        facts = f"전체 채용 공고{scope_str} 총 {total:,}건 기준 수요 상위 기술: {facts_body}"
     debug = (
         {"sql": sql, "params": {"pool": norm_pool(pool), "limit": limit, **extra_params}, "sql_ms": sql_ms}
         if verbose

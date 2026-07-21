@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from app.services.rag.llm import LLMClient
 
 _SYNTH_SYSTEM = (
@@ -40,10 +41,43 @@ def _is_bail(text: str) -> bool:
     return any(m in text for m in _BAIL_MARKERS)
 
 
+def _format_single_fact(fact: str) -> str:
+    """기계식 파라미터 표기를 제거하고 세미콜론 나열 텍스트를 자연스러운 마크다운 불릿으로 가공."""
+    # 내부 디버그 라벨 청소
+    cleaned = re.sub(r"pool=\S+\s*", "", fact)
+    cleaned = re.sub(r"직군=\S+\s*", "", cleaned)
+    cleaned = re.sub(r"신입=\S+\s*", "", cleaned)
+    cleaned = cleaned.strip()
+
+    # 헤더와 데이터 본문 분리 (예: "전체 채용 공고 (백엔드 직군) 총 11,106건 기준 수요 상위 기술 — Java 4833건...")
+    delim = " — " if " — " in cleaned else (": " if ": " in cleaned else None)
+    if delim and delim in cleaned:
+        header, body = cleaned.split(delim, 1)
+        header = header.strip()
+        body = body.strip()
+
+        if ";" in body:
+            items = [it.strip() for it in body.split(";") if it.strip()]
+            bullets = []
+            for it in items:
+                # 'Java 4833건(43.5%)' -> '- **Java**: 4,833건 (43.5%)' 나열 다듬기
+                parts = it.split(" ", 1)
+                if len(parts) == 2:
+                    name, val = parts[0], parts[1]
+                    bullets.append(f"- **{name}**: {val}")
+                else:
+                    bullets.append(f"- {it}")
+            return f"{header}:\n\n" + "\n".join(bullets)
+        return f"{header}: {body}"
+
+    return cleaned
+
+
 def _fallback(facts: list[str]) -> str:
-    if len(facts) <= 1:
-        return facts[0] if facts else ""
-    return "\n".join(f"- {f}" for f in facts)
+    if not facts:
+        return ""
+    formatted_list = [_format_single_fact(f) for f in facts]
+    return "\n\n".join(formatted_list)
 
 
 def synthesize(

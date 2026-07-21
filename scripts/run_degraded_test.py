@@ -14,17 +14,17 @@ from app.services.rag.pipeline import run_chat
 
 def main():
     db = SessionLocal()
-    question = "React Native로 모바일 앱 만드는 공고 추천"
+    question = "요즘 백엔드 공고에서 제일 많이 찾는 기술이 뭐야?"
     
     print("=" * 60)
-    print("🤖 REAL BACKEND RAG DEGRADED TEST RUNNER (AFTER BUGFIX)")
+    print("🤖 REAL BACKEND RAG DEGRADED TEST RUNNER (FORMATTING BEAUTIFIED)")
     print(f"QUESTION: {question}")
     print(f"LLM API KEY: {os.environ.get('GEMINI_API_KEY')}")
     print("=" * 60)
 
     res = run_chat(db, question)
 
-    print("\n[RAG PIPELINE LIVE OUTPUT AFTER FIX]")
+    print("\n[RAG PIPELINE LIVE OUTPUT AFTER BEAUTIFY]")
     print(f"• Degraded Flag     : {res.degraded} (LLM Fallback Mode)")
     print(f"• Output Answer     :\n{res.answer}")
     print("=" * 60)
@@ -33,7 +33,7 @@ def main():
     output_dict = res.model_dump() if hasattr(res, 'model_dump') else res.dict()
     output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs/ppt-demo")
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "degraded_result_fixed_snapshot.json")
+    output_path = os.path.join(output_dir, "degraded_result_beautified_snapshot.json")
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output_dict, f, ensure_ascii=False, indent=2, default=str)
 

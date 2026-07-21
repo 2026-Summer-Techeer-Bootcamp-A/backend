@@ -1,0 +1,532 @@
+{
+  "answer": "전체 채용 공고 (백엔드 직군) 총 11,106건 기준 수요 상위 기술:\n\n- **Java**: 4833건(43.5%)\n- **AWS**: 4390건(39.5%)\n- **JavaScript**: 4105건(37.0%)\n- **Spring**: 3971건(35.8%)\n- **MySQL**: 3149건(28.4%)\n- **Python**: 2748건(24.7%)\n- **Git**: 2690건(24.2%)\n- **Node.js**: 2440건(22.0%)\n\nJava을(를) 요구하는 공고 20,172건 기준 동반 기술 비율:\n\n- **Spring**: 32.2%\n- **JavaScript**: 27.7%\n- **Python**: 23.7%\n- **AWS**: 23.6%\n- **Git**: 17.9%\n- **MySQL**: 14.8%\n- **SQL**: 13.2%\n- **Docker**: 11.0%",
+  "route": "sql",
+  "plan": {
+    "intent": "skill_ranking",
+    "subqueries": [
+      "요즘 백엔드 공고에서 제일 많이 찾는 기술이 뭐야?"
+    ],
+    "tools": [
+      "sql"
+    ],
+    "pool": null,
+    "entities": {
+      "job_category": "백엔드"
+    }
+  },
+  "steps": [
+    {
+      "kind": "plan",
+      "tool": null,
+      "label": "질문 분해",
+      "detail": "intent=skill_ranking · tools=sql · 직군=백엔드 · (휴리스틱 폴백)",
+      "duration_ms": 273.9,
+      "debug": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.0,
+        "attempts": 1,
+        "latency_ms": 226.2,
+        "error": "HTTP Error 400: Bad Request"
+      }
+    },
+    {
+      "kind": "tool",
+      "tool": "sql",
+      "label": "수요 상위 기술 (백엔드)",
+      "detail": "기술태그 집계 · 공고 11,106건 · 직군=백엔드",
+      "duration_ms": 609.2,
+      "debug": null
+    },
+    {
+      "kind": "tool",
+      "tool": "graph",
+      "label": "Java 동반 기술(공동출현)",
+      "detail": "Java 요구 공고 20,172건의 동반 기술",
+      "duration_ms": 1108.1,
+      "debug": null
+    },
+    {
+      "kind": "eval",
+      "tool": null,
+      "label": "근거 충분성 검증",
+      "detail": "pass · 근거 표본 31,278건",
+      "duration_ms": 0.0,
+      "debug": null
+    },
+    {
+      "kind": "synth",
+      "tool": null,
+      "label": "답변 합성",
+      "detail": "LLM 폴백(템플릿)",
+      "duration_ms": 348.7,
+      "debug": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.3,
+        "attempts": 1,
+        "latency_ms": 347.4,
+        "error": "HTTP Error 400: Bad Request"
+      }
+    }
+  ],
+  "tool_results": [
+    {
+      "kind": "list",
+      "label": "수요 상위 기술 (백엔드)",
+      "items": [
+        {
+          "name": "Java",
+          "metric": "4,833건",
+          "pct": 43.5,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "AWS",
+          "metric": "4,390건",
+          "pct": 39.5,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "JavaScript",
+          "metric": "4,105건",
+          "pct": 37.0,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Spring",
+          "metric": "3,971건",
+          "pct": 35.8,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "MySQL",
+          "metric": "3,149건",
+          "pct": 28.4,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Python",
+          "metric": "2,748건",
+          "pct": 24.7,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Git",
+          "metric": "2,690건",
+          "pct": 24.2,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Node.js",
+          "metric": "2,440건",
+          "pct": 22.0,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        }
+      ],
+      "value": null,
+      "unit": null,
+      "nodes": [],
+      "edges": [],
+      "compare": null,
+      "debug": null,
+      "facts": "전체 채용 공고 (백엔드 직군) 총 11,106건 기준 수요 상위 기술: Java 4833건(43.5%); AWS 4390건(39.5%); JavaScript 4105건(37.0%); Spring 3971건(35.8%); MySQL 3149건(28.4%); Python 2748건(24.7%); Git 2690건(24.2%); Node.js 2440건(22.0%)"
+    },
+    {
+      "kind": "graph",
+      "label": "Java 동반 기술(공동출현)",
+      "items": [
+        {
+          "name": "Spring",
+          "metric": "32.2%",
+          "pct": 32.2,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "JavaScript",
+          "metric": "27.7%",
+          "pct": 27.7,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Python",
+          "metric": "23.7%",
+          "pct": 23.7,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "AWS",
+          "metric": "23.6%",
+          "pct": 23.6,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Git",
+          "metric": "17.9%",
+          "pct": 17.9,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "MySQL",
+          "metric": "14.8%",
+          "pct": 14.8,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "SQL",
+          "metric": "13.2%",
+          "pct": 13.2,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        },
+        {
+          "name": "Docker",
+          "metric": "11.0%",
+          "pct": 11.0,
+          "id": null,
+          "company": null,
+          "pool": null,
+          "matched_skills": null,
+          "missing_skills": null,
+          "region": null
+        }
+      ],
+      "value": null,
+      "unit": null,
+      "nodes": [
+        {
+          "id": "Java",
+          "root": true,
+          "hop": 0
+        },
+        {
+          "id": "Spring",
+          "hop": 1
+        },
+        {
+          "id": "JavaScript",
+          "hop": 1
+        },
+        {
+          "id": "Python",
+          "hop": 1
+        },
+        {
+          "id": "AWS",
+          "hop": 1
+        },
+        {
+          "id": "Git",
+          "hop": 1
+        },
+        {
+          "id": "MySQL",
+          "hop": 1
+        },
+        {
+          "id": "SQL",
+          "hop": 1
+        },
+        {
+          "id": "Docker",
+          "hop": 1
+        }
+      ],
+      "edges": [
+        {
+          "source": "Java",
+          "target": "Spring",
+          "strength": 32.2,
+          "n": 6497,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "JavaScript",
+          "strength": 27.7,
+          "n": 5596,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "Python",
+          "strength": 23.7,
+          "n": 4784,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "AWS",
+          "strength": 23.6,
+          "n": 4766,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "Git",
+          "strength": 17.9,
+          "n": 3609,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "MySQL",
+          "strength": 14.8,
+          "n": 2990,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "SQL",
+          "strength": 13.2,
+          "n": 2655,
+          "hop": 1
+        },
+        {
+          "source": "Java",
+          "target": "Docker",
+          "strength": 11.0,
+          "n": 2222,
+          "hop": 1
+        },
+        {
+          "source": "Python",
+          "target": "AWS",
+          "strength": 42.1,
+          "n": 8484,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "Git",
+          "strength": 35.0,
+          "n": 7065,
+          "hop": 2
+        },
+        {
+          "source": "AWS",
+          "target": "Git",
+          "strength": 33.9,
+          "n": 6835,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "AWS",
+          "strength": 33.6,
+          "n": 6770,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "SQL",
+          "strength": 30.1,
+          "n": 6081,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "Git",
+          "strength": 29.0,
+          "n": 5854,
+          "hop": 2
+        },
+        {
+          "source": "AWS",
+          "target": "Docker",
+          "strength": 26.9,
+          "n": 5425,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "JavaScript",
+          "strength": 26.4,
+          "n": 5326,
+          "hop": 2
+        },
+        {
+          "source": "Python",
+          "target": "Docker",
+          "strength": 24.0,
+          "n": 4843,
+          "hop": 2
+        },
+        {
+          "source": "Docker",
+          "target": "Git",
+          "strength": 21.0,
+          "n": 4245,
+          "hop": 2
+        },
+        {
+          "source": "SQL",
+          "target": "AWS",
+          "strength": 20.7,
+          "n": 4173,
+          "hop": 2
+        },
+        {
+          "source": "MySQL",
+          "target": "AWS",
+          "strength": 18.5,
+          "n": 3732,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "MySQL",
+          "strength": 18.0,
+          "n": 3636,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "Docker",
+          "strength": 16.8,
+          "n": 3391,
+          "hop": 2
+        },
+        {
+          "source": "SQL",
+          "target": "Git",
+          "strength": 16.0,
+          "n": 3227,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "SQL",
+          "strength": 15.7,
+          "n": 3169,
+          "hop": 2
+        },
+        {
+          "source": "JavaScript",
+          "target": "Spring",
+          "strength": 14.3,
+          "n": 2877,
+          "hop": 2
+        },
+        {
+          "source": "Spring",
+          "target": "AWS",
+          "strength": 13.8,
+          "n": 2792,
+          "hop": 2
+        },
+        {
+          "source": "MySQL",
+          "target": "Git",
+          "strength": 13.6,
+          "n": 2739,
+          "hop": 2
+        },
+        {
+          "source": "Spring",
+          "target": "Git",
+          "strength": 11.5,
+          "n": 2322,
+          "hop": 2
+        }
+      ],
+      "compare": null,
+      "debug": null,
+      "facts": "Java을(를) 요구하는 공고 20,172건 기준 동반 기술 비율 — Spring 32.2%; JavaScript 27.7%; Python 23.7%; AWS 23.6%; Git 17.9%; MySQL 14.8%; SQL 13.2%; Docker 11.0%"
+    }
+  ],
+  "citations": [
+    {
+      "type": "sql",
+      "ref": "채용공고·기술 태그",
+      "label": "기술태그 집계 · 공고 11,106건 · 직군=백엔드"
+    },
+    {
+      "type": "graph",
+      "ref": "Java 동반출현",
+      "label": "Java 요구 공고 20,172건의 동반 기술"
+    }
+  ],
+  "confidence": {
+    "level": 5,
+    "n": 20172
+  },
+  "degraded": true,
+  "degraded_reasons": [
+    "의도 분류가 실패해 휴리스틱 규칙으로 대체됐어요",
+    "LLM 합성 대신 사실을 그대로 이어붙인 답으로 대체됐어요"
+  ],
+  "total_duration_ms": 2340.6
+}
