@@ -86,11 +86,9 @@ def _dispatch(
     # "내 이력서를 시장과 비교/분석해줘" 류를 물었을 때만) 이 분기를 탄다. 그 외의
     # 일반 시장 인텐트(skill_ranking/skill_demand/...)는 아래 텍스트 인텐트 분기로
     # 그대로 흘러가 실제 질문에 답하고, 첨부된 이력서는 그 턴에서는 그냥 무시된다.
-    if posting_ids and len(posting_ids) >= 2:
-        # 공고를 2개 이상 첨부하면 태그 교집합 대신 첫 번째 공고 원문에서 뽑은
-        # 요구사항을 두 번째 공고 원문과 LLM으로 대조하는 경로를 탄다
-        # (compare_tool.posting_posting_llm_compare). 원문 부재/추출 실패/판정
-        # 실패면 그 함수 내부에서 기존 태그 교집합 비교로 강등한다(degraded=True).
+    # 공고가 2개 이상 첨부되었더라도, 질문 텍스트의 의도가 명시적으로 검색/추천(semantic_search)이라면
+    # 강제로 compare(공고 간 비교)로 가로채지 않고 아래 텍스트 인텐트 분기(semantic_search)로 흐르게 한다.
+    if posting_ids and len(posting_ids) >= 2 and p.intent != "semantic_search":
         r = _run(
             compare_tool.posting_posting_llm_compare,
             session,
