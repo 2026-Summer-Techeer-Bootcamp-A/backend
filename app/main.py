@@ -2,7 +2,11 @@ import anyio.to_thread
 import asyncio
 import logging
 from fastapi import FastAPI, Response
-from fastapi.responses import ORJSONResponse
+try:
+    import orjson  # noqa: F401
+    from fastapi.responses import ORJSONResponse
+except (ImportError, AssertionError):
+    from fastapi.responses import JSONResponse as ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, generate_latest, multiprocess

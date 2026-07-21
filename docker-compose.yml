@@ -1,16 +1,8 @@
 x-logging: &default-logging
-  # 예전엔 Loki+Alloy를 self-host해서 로그를 모았는데, 이 두 컨테이너가
-  # app-vm의 4 vCPU를 uvicorn과 나눠 쓰면서 부하테스트 중 앱 자체의 처리
-  # 용량을 깎아먹고 있었다(300VU에서 DB를 안 건드리는 /healthz까지 11초씩
-  # 걸린 원인). Docker의 gcplogs 드라이버로 각 컨테이너 로그를 Cloud
-  # Logging에 직접 보내도록 바꿨다. 처음 시도했을 때는 VM 서비스 계정에
-  # OAuth scope(logging.write)만 있고 실제 IAM 역할(roles/logging.logWriter)이
-  # 없어 전체 컨테이너 기동 실패로 이어졌다(프로덕션 다운, 즉시 롤백).
-  # 역할을 부여하고 프로퍼게이션을 기다린 뒤 재확인했다.
-  driver: gcplogs
+  driver: json-file
   options:
-    gcp-log-cmd: "true"
-    labels: "com.docker.compose.service"
+    max-size: "10m"
+    max-file: "3"
 
 services:
   app:
