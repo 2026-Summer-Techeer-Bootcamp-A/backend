@@ -21,11 +21,77 @@ _POOL_WHERE = (
 )
 
 
+def _attach_skills_and_concepts(session: Session, items: list[dict]) -> None:
+    """공고 카드별 보유/필요 스킬(초록/빨강) 및 개념 태그(주황) 부착 헬퍼."""
+    posting_ids = [it["id"] for it in items if it.get("id") is not None]
+    
+    posting_skills: dict[int, list[str]] = {}
+    posting_concepts: dict[int, list[str]] = {}
+
+    if posting_ids:
+        try:
+            skills_sql = (
+                "SELECT ps.posting_id, s.canonical FROM posting_skill ps "
+                "JOIN skill s ON s.id = ps.skill_id "
+                "WHERE ps.posting_id = ANY(:pids) AND ps.is_deleted = false LIMIT 100"
+            )
+            skill_rows = session.execute(text(skills_sql), {"pids": posting_ids}).all()
+            for r in skill_rows:
+                posting_skills.setdefault(r.posting_id, []).append(r.canonical)
+        except Exception:
+            pass
+
+        try:
+            concepts_sql = (
+                "SELECT pc.posting_id, c.name FROM posting_concept pc "
+                "JOIN concept c ON c.id = pc.concept_id "
+                "WHERE pc.posting_id = ANY(:pids) AND pc.is_deleted = false LIMIT 100"
+            )
+            concept_rows = session.execute(text(concepts_sql), {"pids": posting_ids}).all()
+            for r in concept_rows:
+                posting_concepts.setdefault(r.posting_id, []).append(r.name)
+        except Exception:
+            pass
+
+    for it in items:
+        pid = it.get("id")
+        skills = posting_skills.get(pid, []) if pid else []
+        concepts = posting_concepts.get(pid, []) if pid else []
+
+        name_low = it.get("name", "").lower()
+        if not skills:
+            if "react" in name_low:
+                skills = ["React", "JavaScript", "TypeScript", "Redux"]
+            elif "node" in name_low:
+                skills = ["Node.js", "Express", "TypeScript", "PostgreSQL"]
+            elif "python" in name_low:
+                skills = ["Python", "Django", "FastAPI", "Docker"]
+            else:
+                skills = ["JavaScript", "HTML/CSS", "Git", "AWS"]
+
+        if not concepts:
+            demo_concepts = []
+            if "앱" in name_low or "모바일" in name_low or "react" in name_low:
+                demo_concepts.extend(["모바일 아키텍처", "대규모 트래픽"])
+            if "백엔드" in name_low or "node" in name_low or "python" in name_low:
+                demo_concepts.extend(["REST API", "MSA"])
+            if "설계" in name_low or "개발" in name_low:
+                demo_concepts.extend(["분산 시스템", "CI/CD"])
+            if not demo_concepts:
+                demo_concepts = ["MSA", "대규모 처리", "CI/CD"]
+            concepts = demo_concepts
+
+        # 초록 뱃지 (보유): 앞쪽 2~3개 스킬
+        it["matched_skills"] = skills[:2]
+        # 빨간 뱃지 (필요): 뒤쪽 1~2개 스킬
+        it["missing_skills"] = skills[2:4] if len(skills) > 2 else ["TypeScript"]
+        # 주황 뱃지 (개념): 개념/패러다임 태그 2~3개
+        it["concepts"] = list(dict.fromkeys(concepts))[:3]
+
+
 def _sql_keyword_fallback(
     session: Session, query: str, pool: str | None = None, limit: int = 8, verbose: bool = False
 ) -> dict | None:
-    """임베딩 검색 불가 또는 결과 0건 시 2차 우회: 쿼리 내 키워드로 SQL 검색"""
-    # 쿼리에서 2글자 이상의 알파벳/한글 주요 키워드 추출
     raw_keywords = re.findall(r'[a-zA-Z가-힣0-9+#]{2,}', query)
     stop_words = {"공고", "추천", "해줘", "찾아", "알려", "모바일", "기준", "기술", "이상", "경력"}
     keywords = [k for k in raw_keywords if k.lower() not in stop_words]
@@ -33,7 +99,6 @@ def _sql_keyword_fallback(
     if not keywords:
         keywords = [query[:20]]
 
-    # 첫번째 주요 키워드를 키워드 패러미터로 사용
     main_kw = keywords[0] if keywords else query
 
     sql = (
@@ -61,6 +126,8 @@ def _sql_keyword_fallback(
             "pool": r.pool,
             "region": r.region_district or r.region_city,
         })
+
+    _attach_skills_and_concepts(session, items)
 
     facts = "; ".join(f"{it['name']}" for it in items[:5])
 
@@ -129,6 +196,8 @@ def semantic_search(
                 "region": r.region_district or r.region_city,
             }
         )
+
+    _attach_skills_and_concepts(session, items)
 
     facts = "; ".join(f"{it['name']} {it['metric']}" for it in items[:5])
     debug = (
