@@ -31,7 +31,7 @@ def _attach_skills_and_concepts(session: Session, items: list[dict]) -> None:
     if posting_ids:
         try:
             skills_sql = (
-                "SELECT ps.posting_id, s.canonical FROM posting_skill ps "
+                "SELECT ps.posting_id, s.canonical FROM posting_tech ps "
                 "JOIN skill s ON s.id = ps.skill_id "
                 "WHERE ps.posting_id = ANY(:pids) AND ps.is_deleted = false LIMIT 100"
             )

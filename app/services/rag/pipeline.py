@@ -49,7 +49,7 @@ def _attach_single_posting_facts(session: Session, posting_id: int) -> dict | No
             "SELECT p.title, p.company, p.pool, p.region_city, p.region_district, "
             "string_agg(s.canonical, ', ') as skills "
             "FROM posting p "
-            "LEFT JOIN posting_skill ps ON ps.posting_id = p.id AND ps.is_deleted = false "
+            "LEFT JOIN posting_tech ps ON ps.posting_id = p.id AND ps.is_deleted = false "
             "LEFT JOIN skill s ON s.id = ps.skill_id "
             "WHERE p.id = :pid "
             "GROUP BY p.id, p.title, p.company, p.pool, p.region_city, p.region_district"
@@ -110,55 +110,61 @@ def _dispatch(
             result["duration_ms"] = round((time.perf_counter() - start) * 1000, 1)
         return result
 
-    # 첨부(공고/이력서)는 텍스트 인텐트보다 우선하는 명시적 신호다(K2) — 공고를 2개
-    # 이상 첨부하거나, 이력서와 공고를 함께 첨부한 경우는 첨부 자체가 "이걸 비교해줘"라는
-    # 뜻이 명확하므로 아래 텍스트 인텐트 분기보다 먼저 처리하고 조기 반환한다.
-    # 도구가 대상을 못 찾아 None을 반환해도(예: 삭제된 공고 id) 여기서는 top_skills로
-    # 대체하지 않는다 — run_chat_events가 tool_outputs가 빈 것을 보고 "비교 대상을
-    # 찾지 못했다"는 안내로 조기 종료하므로, fell_back=False로 그대로 반환한다.
+    # 첨부(공고/이력서)는 텍스트 인텐트보다 우선하는 명시적 신호다(K2) — 이력서와 공고를
+    # 함께 첨부하거나 공고를 2개 이상 첨부한 경우는 첨부 자체가 "이걸 비교해줘"라는 뜻이
+    # 명확하므로, 텍스트 인텐트가 무엇이든(LLM 실패로 overview/skill_ranking 등으로 오분류돼도)
+    # 아래 텍스트 인텐트 분기보다 먼저 비교를 실행하고 조기 반환한다. 이렇게 하지 않으면
+    # 인텐트가 화이트리스트({compare,resume_gap,...})를 못 맞출 때 비교가 통째로 스킵되고
+    # 무관한 top_skills 랭킹으로 새어나갔다(실측 버그: "이 이력서로 이 공고에 지원하면 뭐가
+    # 부족할까?"가 overview로 오분류 → 수요 상위 기술로 대체).
     #
-    # 세 번째 분기(이력서만 첨부, 공고는 없음)는 예전엔 "resume_gap/resume_coverage가
-    # 아니면 무조건 resume_market"이었다 — 이력서를 첨부해 놓고 "React 수요 어때?"를
-    # 물어도 resume_market으로 가로채 버리는 오탐 버그였다(K2 이후 발견). 이제는
-    # router.py가 텍스트에서 명시적으로 resume_market을 분류했을 때만(=사용자가 실제로
-    # "내 이력서를 시장과 비교/분석해줘" 류를 물었을 때만) 이 분기를 탄다. 그 외의
-    # 일반 시장 인텐트(skill_ranking/skill_demand/...)는 아래 텍스트 인텐트 분기로
-    # 그대로 흘러가 실제 질문에 답하고, 첨부된 이력서는 그 턴에서는 그냥 무시된다.
-    # 공고가 2개 이상 첨부되었더라도, 질문 텍스트의 의도가 명시적으로 검색/추천(semantic_search)이라면
-    # 강제로 compare(공고 간 비교)로 가로채지 않고 아래 텍스트 인텐트 분기(semantic_search)로 흐르게 한다.
-    if posting_ids and len(posting_ids) >= 2 and p.intent != "semantic_search":
-        r = _run(
-            compare_tool.posting_posting_llm_compare,
-            session,
-            posting_ids[0],
-            posting_ids[1],
-            llm or get_llm(),
-        )
-        if r:
-            out.append(r)
+    # 유일한 예외는 semantic_search(명시적 검색/추천)다 — 이땐 첨부를 강제로 compare로
+    # 가로채지 않고, 첨부를 검색 컨텍스트로만 쓰도록 아래 텍스트 분기로 흘려보낸다.
+    #
+    # 대상을 못 찾아 결과가 비어도(삭제된 id 등) 여기서 top_skills로 대체하지 않는다 —
+    # run_chat_events가 빈 tool_outputs를 보고 "비교 대상을 찾지 못했다"는 안내로 조기
+    # 종료하므로, fell_back=False로 그대로 반환한다.
+    has_resume = bool(owned_skill_ids) or bool(resume_text)
+    if posting_ids and p.intent != "semantic_search" and (has_resume or len(posting_ids) >= 2):
+        llm_client = llm or get_llm()
+        if has_resume:
+            # 이력서 ↔ 공고 N개: 공고마다 이력서 대비 커버리지/부족을 비교한다.
+            # 단건이면 원문 기반 LLM 딥 판정(요구사항별 met/gap, 기존 UX 유지)을 우선하고,
+            # 여러 건이면 태그 기반 비교로 각 공고를 이력서와 대조한다 — 태그 비교는 SQL
+            # 한 번이라 공고 수만큼 반복해도 LLM 호출이 폭증하지 않는다. 프론트가 여러
+            # resume_posting 결과를 모아 "가장 잘 맞는 공고 · 공통으로 부족한 기술"로 종합한다.
+            if len(posting_ids) == 1:
+                first = (
+                    _run(
+                        compare_tool.resume_posting_llm_compare,
+                        session, resume_text, owned_skill_ids, posting_ids[0], llm_client,
+                    )
+                    if resume_text
+                    else _run(compare_tool.resume_posting_compare, session, owned_skill_ids, posting_ids[0])
+                )
+                if first:
+                    out.append(first)
+            else:
+                for pid in posting_ids:
+                    r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, pid)
+                    if r:
+                        out.append(r)
+        else:
+            # 공고 ↔ 공고 N개(이력서 없음): 2건이면 원문 기반 LLM 딥 판정 1쌍(기존 UX 유지),
+            # 3건 이상이면 첫 공고를 기준으로 나머지와 태그 기반으로 비교한다(스타 패턴).
+            # 프론트가 여러 posting_posting 결과를 모아 "모든 공고 공통 요구 · 공고별 차이"로 종합한다.
+            if len(posting_ids) == 2:
+                r = _run(compare_tool.posting_posting_llm_compare, session, posting_ids[0], posting_ids[1], llm_client)
+                if r:
+                    out.append(r)
+            else:
+                base = posting_ids[0]
+                for other in posting_ids[1:]:
+                    r = _run(compare_tool.posting_posting_compare, session, base, other)
+                    if r:
+                        out.append(r)
         return out, False
-    resume_compare_intents = {"compare", "resume_gap", "resume_coverage", "resume_market"}
-    if resume_text and posting_ids and len(posting_ids) == 1 and (p.intent in resume_compare_intents or not p.intent):
-        # 이력서 확인 세션에 원문이 실려 있으면 태그 교집합 대신 LLM이 원문을 읽고
-        # 요구사항별로 판정하는 경로를 탄다(compare_tool.resume_posting_llm_compare).
-        # 원문이 없으면(세션 미첨부/만료) 아래 기존 태그 기반 분기를 그대로 쓴다.
-        r = _run(
-            compare_tool.resume_posting_llm_compare,
-            session,
-            resume_text,
-            owned_skill_ids,
-            posting_ids[0],
-            llm or get_llm(),
-        )
-        if r:
-            out.append(r)
-        return out, False
-    elif owned_skill_ids and posting_ids and (p.intent in resume_compare_intents or not p.intent):
-        r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, posting_ids[0])
-        if r:
-            out.append(r)
-        return out, False
-    elif owned_skill_ids and not posting_ids and p.intent == "resume_market":
+    if owned_skill_ids and not posting_ids and p.intent == "resume_market":
         r = _run(compare_tool.resume_market, session, owned_skill_ids, pool, category)
         if r:
             out.append(r)
