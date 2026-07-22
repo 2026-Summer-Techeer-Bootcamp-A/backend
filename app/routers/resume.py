@@ -1,4 +1,6 @@
+import json
 from fastapi import APIRouter, HTTPException, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
@@ -29,6 +31,7 @@ from app.schemas.resume import (
 from app.schemas.resume_preference import ResumePreferences
 from app.services.resume_feedback import generate_resume_feedback
 from app.services.resume import parse_resume_pdf
+from app.services.resume_llm import parse_resume_llm_stream
 
 router = APIRouter()
 
@@ -250,6 +253,57 @@ async def parse_resume(file: UploadFile, session: SessionDep) -> ResumeParseResp
         ) from exc
 
 
+
+@router.post(
+    "/parse-stream",
+    status_code=status.HTTP_200_OK,
+)
+async def parse_resume_stream(file: UploadFile) -> StreamingResponse:
+    """이력서 PDF를 LLM으로 분석하며 Server-Sent Events로 실시간 결과를 방출한다.
+
+    이벤트 타입: start | pii_detected | meta_detected | skill_detected |
+                 cert_detected | memo_sentence | complete | error
+    """
+    if not _is_pdf_upload(file):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="unsupported media type",
+        )
+
+    contents = await file.read()
+    if not contents.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="unsupported media type",
+        )
+
+    if len(contents) > settings.resume_parse_max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="file too large",
+        )
+
+    def _event_gen():
+        """동기 제너레이터를 SSE 형식으로 직렬화."""
+        try:
+            for event in parse_resume_llm_stream(contents):
+                payload = json.dumps(event, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+        except Exception as exc:
+            err = json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)
+            yield f"data: {err}\n\n"
+
+    return StreamingResponse(
+        _event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+
 @router.post(
     "/confirm",
     response_model=ResumeConfirmResponse,
@@ -259,6 +313,7 @@ def confirm_resume(payload: ResumeConfirmRequest) -> ResumeConfirmResponse:
     ttl = settings.resume_confirm_session_ttl_seconds
     session_id = create_resume_confirm_session(payload.model_dump(), ttl)
     return ResumeConfirmResponse(session_id=session_id, ttl=ttl)
+
 
 
 def _is_pdf_upload(file: UploadFile) -> bool:
