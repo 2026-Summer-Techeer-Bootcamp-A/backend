@@ -142,6 +142,9 @@ def parse_resume_llm_stream(
   "level": "<intern|junior|mid|senior|lead|director>",
   "regions": ["<list of regions from ['서울', '경기', '인천', '부산', '대구', '대전', '광주', '그 외']>"],
   "sector_interests": ["<list of sectors from ['백엔드', '프론트엔드', '데이터', 'AI·ML', '인프라·DevOps', '보안', '모바일', '게임', '핀테크', '대규모 트래픽', 'MSA', '클라우드']>"],
+  "core_competencies": ["<list of key technical/domain strengths, e.g. 'RESTful API 설계', 'DB 쿼리 최적화', '대용량 데이터 처리'>"],
+  "key_projects": ["<list of notable project highlights & achievements, e.g. '결제 트래픽 50% 개선', 'MSA 서비스 분리'>"],
+  "work_style": "<string: preferred work arrangement, e.g. 재택·하이브리드>",
   "skills": [
     {{"canonical": "<tech name>", "category": "<backend|frontend|data|devops|mobile|other>", "evidence": "<exact sentence from resume where this skill appears>"}}
   ],
@@ -185,6 +188,9 @@ Return ONLY the JSON object. No explanation."""
         "level": data.get("level", ""),
         "regions": data.get("regions", []),
         "sector_interests": data.get("sector_interests", []),
+        "core_competencies": data.get("core_competencies", []),
+        "key_projects": data.get("key_projects", []),
+        "work_style": data.get("work_style", ""),
     }
     time.sleep(0.15)
 
