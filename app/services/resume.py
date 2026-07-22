@@ -33,11 +33,11 @@ class TaxonomyEntry:
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
-    text = extract_pdf_text_with_pypdf(pdf_bytes)
+    text = extract_pdf_text_with_pdftotext(pdf_bytes)
     if text:
         return text
 
-    return extract_pdf_text_with_pdftotext(pdf_bytes)
+    return extract_pdf_text_with_pypdf(pdf_bytes)
 
 
 def extract_pdf_text_with_pypdf(pdf_bytes: bytes) -> str:
