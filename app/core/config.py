@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     resume_parse_max_bytes: int = 10 * 1024 * 1024
     resume_confirm_session_ttl_seconds: int = 3600
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
     # 엄격한 면접관 시스템 프롬프트 + JSON 모드 조합은 실측 16~17초까지 걸려
     # 기존 10초 기본값으로는 항상 폴백으로 빠졌다. 여유를 두고 25초로 상향.
     gemini_timeout_seconds: float = 25.0
