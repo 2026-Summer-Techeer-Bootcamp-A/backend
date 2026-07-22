@@ -183,6 +183,74 @@ def test_dispatch_resume_gap_uses_resume_tool(session: Session) -> None:
     assert fell_back is False
 
 
+# --- 첨부 우선(K2 확장): 인텐트 오분류 시에도 top_skills로 새지 않고 비교를 실행 ----------
+
+
+def _posting_id(session: Session, title: str) -> int:
+    return session.execute(select(Posting.id).where(Posting.title == title)).scalar_one()
+
+
+def test_dispatch_resume_single_posting_compares_even_when_intent_misclassified(session: Session) -> None:
+    """실측 버그 재현: "이 이력서로 이 공고에 지원하면 뭐가 부족할까?"가 overview로
+    오분류돼도, 이력서+공고 첨부가 있으면 top_skills가 아니라 resume_posting 비교가 나와야 한다."""
+    owned = {session.info["python_id"]}
+    p1 = _posting_id(session, "백엔드")
+    plan = Plan(intent="overview", tools=["sql"], pool="domestic", entities={}, subqueries=["이 이력서로 이 공고에 지원하면 뭐가 부족할까?"])
+    tool_outputs, fell_back = rag_pipeline._dispatch(session, plan, owned_skill_ids=owned, posting_ids=[p1])
+    assert len(tool_outputs) == 1
+    assert tool_outputs[0]["tool_result"]["kind"] == "resume_posting"  # top_skills 아님
+    assert fell_back is False
+
+
+def test_dispatch_resume_multi_posting_compares_each(session: Session) -> None:
+    """이력서 + 공고 N개: 공고마다 이력서 대비 비교(resume_posting)가 하나씩 나온다."""
+    owned = {session.info["python_id"]}
+    p1 = _posting_id(session, "백엔드")
+    p2 = _posting_id(session, "백엔드2")
+    plan = Plan(intent="overview", tools=["sql"], pool="domestic", entities={}, subqueries=["q"])
+    tool_outputs, fell_back = rag_pipeline._dispatch(session, plan, owned_skill_ids=owned, posting_ids=[p1, p2])
+    assert len(tool_outputs) == 2
+    assert all(o["tool_result"]["kind"] == "resume_posting" for o in tool_outputs)
+    assert fell_back is False
+
+
+def test_dispatch_three_postings_star_compare_without_resume(session: Session) -> None:
+    """이력서 없이 공고 3개: 첫 공고 기준 나머지와 태그 비교(posting_posting) N-1건."""
+    p3 = Posting(source="t", source_uid="3", pool="domestic", title="백엔드3", company="회사C", post_date=date(2026, 1, 3))
+    session.add(p3)
+    session.flush()
+    session.add(PostingTech(posting_id=p3.id, skill_id=session.info["python_id"]))
+    session.commit()
+    p1 = _posting_id(session, "백엔드")
+    p2 = _posting_id(session, "백엔드2")
+    plan = Plan(intent="overview", tools=["sql"], pool="domestic", entities={}, subqueries=["q"])
+    tool_outputs, fell_back = rag_pipeline._dispatch(session, plan, posting_ids=[p1, p2, p3.id])
+    assert len(tool_outputs) == 2  # 스타 패턴: (p1,p2), (p1,p3)
+    assert all(o["tool_result"]["kind"] == "posting_posting" for o in tool_outputs)
+    assert fell_back is False
+
+
+def test_dispatch_semantic_search_not_hijacked_by_attachments(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """semantic_search는 예외 — 첨부가 있어도 강제로 compare로 가로채지 않고 벡터 경로로 흐른다.
+    실제 semantic_search는 Postgres 전용 ILIKE를 써서 sqlite에서 못 도므로 스텁으로 갈아끼우고,
+    compare가 아니라 그 스텁(=벡터 경로)이 호출됐는지로 검증한다."""
+    from app.services.rag.tools import vector_tool
+
+    sentinel = {"tool": "vector", "tool_result": {"kind": "posting_list", "label": "추천", "items": []},
+                "citation": {"type": "vector", "ref": "x", "label": "y"}, "n": 0, "facts": ""}
+    monkeypatch.setattr(vector_tool, "semantic_search", lambda *a, **k: sentinel)
+
+    owned = {session.info["python_id"]}
+    p1 = _posting_id(session, "백엔드")
+    plan = Plan(intent="semantic_search", tools=["vector"], pool="domestic", entities={}, subqueries=["비슷한 공고 추천"])
+    tool_outputs, _fell_back = rag_pipeline._dispatch(session, plan, owned_skill_ids=owned, posting_ids=[p1])
+    kinds = {o["tool_result"]["kind"] for o in tool_outputs}
+    assert "resume_posting" not in kinds and "posting_posting" not in kinds
+    assert "posting_list" in kinds  # 벡터(semantic) 경로로 흘렀다
+
+
 # --- pipeline.run_chat_events: 이력서 미첨부 조기 안내 -------------------------------
 
 
