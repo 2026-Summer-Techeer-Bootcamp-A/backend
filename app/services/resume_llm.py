@@ -41,10 +41,10 @@ def _call_gemini(prompt: str, *, temperature: float = 0.1) -> str | None:
     import urllib.request
 
     # 이력서 파싱에는 Flash(빠른 모델)를 우선 사용한다.
-    # 설정된 모델이 Flash 계열이면 그대로, 아니면 gemini-2.0-flash-lite로 폴백.
+    # 설정된 모델이 Flash 계열이면 그대로, 아니면 gemini-3.5-flash-lite로 폴백.
     model = settings.gemini_model
     if "flash" not in model.lower():
-        model = "gemini-2.0-flash-lite"
+        model = "gemini-3.5-flash-lite"
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     body = {
@@ -125,7 +125,7 @@ def parse_resume_llm_stream(
         yield {"type": "error", "message": "추출 가능한 텍스트가 없습니다."}
         return
 
-    yield {"type": "start", "total_chars": len(text), "preview_text": text[:400]}
+    yield {"type": "start", "total_chars": len(text), "preview_text": text, "raw_text": text}
 
     # ── 2. 개인정보 감지 (정규식 — 즉시 방출) ───────────────────
     pii_items = _detect_pii_in_text(text)
@@ -139,6 +139,9 @@ def parse_resume_llm_stream(
 {{
   "position": "<string: job title in Korean, e.g. 백엔드 개발자>",
   "career_years": <integer or null: years of experience>,
+  "level": "<intern|junior|mid|senior|lead|director>",
+  "regions": ["<list of regions from ['서울', '경기', '인천', '부산', '대구', '대전', '광주', '그 외']>"],
+  "sector_interests": ["<list of sectors from ['백엔드', '프론트엔드', '데이터', 'AI·ML', '인프라·DevOps', '보안', '모바일', '게임', '핀테크', '대규모 트래픽', 'MSA', '클라우드']>"],
   "skills": [
     {{"canonical": "<tech name>", "category": "<backend|frontend|data|devops|mobile|other>", "evidence": "<exact sentence from resume where this skill appears>"}}
   ],
@@ -179,6 +182,9 @@ Return ONLY the JSON object. No explanation."""
         "type": "meta_detected",
         "position": data.get("position", ""),
         "career_years": data.get("career_years"),
+        "level": data.get("level", ""),
+        "regions": data.get("regions", []),
+        "sector_interests": data.get("sector_interests", []),
     }
     time.sleep(0.15)
 
