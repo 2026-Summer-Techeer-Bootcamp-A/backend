@@ -37,7 +37,8 @@ def _call_gemini(prompt: str, *, temperature: float = 0.1) -> str | None:
     if not settings.gemini_api_key:
         return None
 
-    import urllib.request, urllib.error
+    import urllib.error
+    import urllib.request
 
     # 이력서 파싱에는 Flash(빠른 모델)를 우선 사용한다.
     # 설정된 모델이 Flash 계열이면 그대로, 아니면 gemini-2.0-flash-lite로 폴백.
