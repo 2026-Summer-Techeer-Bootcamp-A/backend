@@ -41,12 +41,21 @@ def session() -> Iterator[Session]:
             post_date=date(2026, 1, 1),
             description='[{"title":"자격요건","text":"Python 백엔드 개발 경험"}]',
         )
-        s.add(posting)
+        second_posting = Posting(
+            source="t", source_uid="2", pool="domestic", title="백엔드2", company="회사B",
+            post_date=date(2026, 1, 2),
+            description='[{"title":"자격요건","text":"Python API 개발 경험"}]',
+        )
+        s.add_all([posting, second_posting])
         s.flush()
-        s.add(PostingTech(posting_id=posting.id, skill_id=python.id))
+        s.add_all([
+            PostingTech(posting_id=posting.id, skill_id=python.id),
+            PostingTech(posting_id=second_posting.id, skill_id=python.id),
+        ])
         s.commit()
         s.info["python_id"] = python.id
         s.info["posting_id"] = posting.id
+        s.info["second_posting_id"] = second_posting.id
         yield s
     engine.dispose()
 
@@ -90,6 +99,7 @@ def client(session: Session) -> Iterator[TestClient]:
     test_client = TestClient(app)
     test_client.resume_id = resume.resume_id  # type: ignore[attr-defined]
     test_client.posting_id = session.info["posting_id"]  # type: ignore[attr-defined]
+    test_client.second_posting_id = session.info["second_posting_id"]  # type: ignore[attr-defined]
     test_client.token = create_access_token(str(user.id))  # type: ignore[attr-defined]
     yield test_client
     app.dependency_overrides.clear()
@@ -172,3 +182,34 @@ def test_chat_without_resume_session_id_degrades_to_tag_compare(client: TestClie
     assert resp.status_code == 200
     body = resp.json()
     assert body["tool_results"][0]["kind"] == "resume_posting"
+
+
+def test_chat_with_resume_session_id_compares_every_attached_posting_with_llm(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "app.routers.chat.get_resume_text_from_session",
+        lambda session_id: "Python 백엔드 개발자, 4년차." if session_id == "sess-multi" else None,
+    )
+    monkeypatch.setattr("app.services.rag.pipeline.get_llm", lambda: _FakeLLM())
+
+    resp = client.post(
+        "/api/v1/chat",
+        json={
+            "question": "내 이력서와 첨부한 공고 2개를 비교해줘",
+            "pool": "domestic",
+            "resume_id": client.resume_id,
+            "posting_ids": [client.posting_id, client.second_posting_id],
+            "resume_session_id": "sess-multi",
+        },
+        headers={"Authorization": f"Bearer {client.token}"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["tool_results"]) == 2
+    assert [result["kind"] for result in body["tool_results"]] == [
+        "resume_posting_llm",
+        "resume_posting_llm",
+    ]
+    assert all(result["compare"]["degraded"] is False for result in body["tool_results"])
