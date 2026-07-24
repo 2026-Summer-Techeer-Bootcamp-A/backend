@@ -1,13 +1,15 @@
 from typing import Annotated
+
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-import jwt
 from jwt.exceptions import InvalidTokenError
+from sqlalchemy.orm import Session
+
 
 from app.core.db import get_session
-from app.core.security import ALGORITHM, SECRET_KEY
 from app.core.redis import is_token_blocklisted
+from app.core.security import ALGORITHM, SECRET_KEY
 from app.models.user import User
 
 # Swagger UI 및 자동 문서화에서 토큰을 입력받을 수 있도록 엔드포인트를 명시.

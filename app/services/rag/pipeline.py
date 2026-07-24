@@ -129,10 +129,9 @@ def _dispatch(
         llm_client = llm or get_llm()
         if has_resume:
             # 이력서 ↔ 공고 N개: 공고마다 이력서 대비 커버리지/부족을 비교한다.
-            # 단건이면 원문 기반 LLM 딥 판정(요구사항별 met/gap, 기존 UX 유지)을 우선하고,
-            # 여러 건이면 태그 기반 비교로 각 공고를 이력서와 대조한다 — 태그 비교는 SQL
-            # 한 번이라 공고 수만큼 반복해도 LLM 호출이 폭증하지 않는다. 프론트가 여러
-            # resume_posting 결과를 모아 "가장 잘 맞는 공고 · 공통으로 부족한 기술"로 종합한다.
+            # 원문 세션이 있으면 공고 수와 관계없이 각 공고를 원문 기반 LLM 딥 판정으로
+            # 비교한다. 원문이 없을 때만 기존 태그 비교로 강등한다. 프론트가 여러 결과를
+            # 모아 "가장 잘 맞는 공고 · 공통으로 부족한 기술"로 종합한다.
             if len(posting_ids) == 1:
                 first = (
                     _run(
@@ -146,7 +145,14 @@ def _dispatch(
                     out.append(first)
             else:
                 for pid in posting_ids:
-                    r = _run(compare_tool.resume_posting_compare, session, owned_skill_ids, pid)
+                    r = (
+                        _run(
+                            compare_tool.resume_posting_llm_compare,
+                            session, resume_text, owned_skill_ids, pid, llm_client,
+                        )
+                        if resume_text
+                        else _run(compare_tool.resume_posting_compare, session, owned_skill_ids, pid)
+                    )
                     if r:
                         out.append(r)
         else:
